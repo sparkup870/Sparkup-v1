@@ -2,12 +2,18 @@ import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { NavigationContainer } from '@react-navigation/native';
-import { Home, MessageCircle, MapPin } from 'lucide-react-native';
-import { View, StyleSheet } from 'react-native';
+import { Home, MessageCircle, MapPin, Compass } from 'lucide-react-native';
+import { StyleSheet } from 'react-native';
 
 import HomeScreen from '../screens/HomeScreen';
 import ChatScreen from '../screens/ChatScreen';
 import MatchScreen from '../screens/MatchScreen';
+import WelcomeScreen from '../screens/WelcomeScreen';
+import LoginScreen from '../screens/LoginScreen';
+import ProfileSetupScreen from '../screens/ProfileSetupScreen';
+import QuestionnaireScreen from '../screens/QuestionnaireScreen';
+import GhostScreen from '../screens/GhostScreen';
+import PostsScreen from '../screens/PostsScreen';
 import { COLORS } from '../constants/theme';
 
 const Tab = createBottomTabNavigator();
@@ -43,8 +49,17 @@ function TabNavigator() {
         }}
       />
       <Tab.Screen 
+        name="PostsTab" 
+        component={PostsScreen} 
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <Compass color={color} size={28} />
+          ),
+        }}
+      />
+      <Tab.Screen 
         name="ProfileTab" 
-        component={View} // Placeholder for profile/location
+        component={GhostScreen} 
         options={{
           tabBarIcon: ({ color, size }) => (
             <MapPin color={color} size={28} />
@@ -58,7 +73,11 @@ function TabNavigator() {
 export default function RootNavigator() {
   return (
     <NavigationContainer>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Navigator initialRouteName="Welcome" screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="Welcome" component={WelcomeScreen} />
+        <Stack.Screen name="Login" component={LoginScreen} />
+        <Stack.Screen name="ProfileSetup" component={ProfileSetupScreen} />
+        <Stack.Screen name="Questionnaire" component={QuestionnaireScreen} />
         <Stack.Screen name="MainTabs" component={TabNavigator} />
         <Stack.Screen 
           name="MatchModal" 
