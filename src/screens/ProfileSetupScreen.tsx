@@ -1,14 +1,60 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, SafeAreaView, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, SafeAreaView, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import { ChevronLeft, Camera } from 'lucide-react-native';
 import { COLORS, SIZES } from '../constants/theme';
+import { supabase } from '../api/supabase';
+import { useAuthStore } from '../store/useAuthStore';
 
 export default function ProfileSetupScreen() {
   const navigation = useNavigation<any>();
   const [name, setName] = useState('');
   const [bio, setBio] = useState('');
+  const [loading, setLoading] = useState(false);
+  const { user, fetchProfile } = useAuthStore();
+
+  const handleSaveProfile = async () => {
+    if (!name.trim() || !bio.trim()) {
+      Alert.alert('Missing Info', 'Please provide at least your name and bio.');
+      return;
+    }
+
+    if (!user) return;
+
+    setLoading(true);
+    
+    try {
+      const emailDomain = user.email?.split('@')[1] || '';
+      
+      const { data, error } = await supabase
+        .from('users')
+        .upsert({
+          id: user.id,
+          email: user.email,
+          university_domain: emailDomain,
+          name: name.trim(),
+          anonymous_id: `User#${Math.floor(1000 + Math.random() * 9000)}`,
+          bio: bio.trim(),
+          avatar_url: 'https://i.pravatar.cc/150?img=' + Math.floor(Math.random() * 70),
+          is_verified: true, // Auto-verifying for MVP
+        }, { onConflict: 'id' });
+
+      if (error) {
+        throw error;
+      }
+
+      await fetchProfile(); // Refresh store
+      
+      // Navigate to Questionnaire
+      navigation.navigate('Questionnaire');
+      
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to save profile');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <LinearGradient
@@ -53,10 +99,11 @@ export default function ProfileSetupScreen() {
             />
 
             <TouchableOpacity 
-              style={styles.button}
-              onPress={() => navigation.navigate('Questionnaire')}
+              style={[styles.button, loading && { opacity: 0.7 }]}
+              onPress={handleSaveProfile}
+              disabled={loading}
             >
-              <Text style={styles.buttonText}>Continue</Text>
+              {loading ? <ActivityIndicator color={COLORS.white} /> : <Text style={styles.buttonText}>Continue</Text>}
             </TouchableOpacity>
           </View>
         </ScrollView>

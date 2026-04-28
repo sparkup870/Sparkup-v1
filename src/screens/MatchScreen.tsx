@@ -2,11 +2,19 @@ import React from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity, SafeAreaView } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { X, MessageCircle } from 'lucide-react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { COLORS } from '../constants/theme';
+import { useAuthStore } from '../store/useAuthStore';
 
 export default function MatchScreen() {
-  const navigation = useNavigation();
+  const navigation = useNavigation<any>();
+  const route = useRoute<any>();
+  const { profile } = useAuthStore();
+  
+  const { otherUser, match } = route.params || { 
+    otherUser: { name: 'Julia', avatar_url: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=300&q=80' },
+    match: { compatibility_score: 85 }
+  };
 
   return (
     <LinearGradient
@@ -22,12 +30,12 @@ export default function MatchScreen() {
           <View style={styles.imagesContainer}>
             {/* User 1 Image (Background) */}
             <Image 
-              source={{ uri: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=300&q=80' }} 
+              source={{ uri: profile?.avatar_url || 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=300&q=80' }} 
               style={[styles.imageCard, styles.imageCardLeft]} 
             />
             {/* User 2 Image (Foreground) */}
             <Image 
-              source={{ uri: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=300&q=80' }} 
+              source={{ uri: otherUser.avatar_url || 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=300&q=80' }} 
               style={[styles.imageCard, styles.imageCardRight]} 
             />
             {/* Heart Icon in middle */}
@@ -37,7 +45,7 @@ export default function MatchScreen() {
           </View>
 
           <Text style={styles.matchTitle}>You matched!</Text>
-          <Text style={styles.matchSubtitle}>You and Julia has 36 Hours to make the first move</Text>
+          <Text style={styles.matchSubtitle}>You and {otherUser.name} have a {match.compatibility_score}% compatibility spark!</Text>
         </View>
 
         <View style={styles.footer}>

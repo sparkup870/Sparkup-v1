@@ -1,15 +1,92 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, ActivityIndicator, Alert } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import { ChevronLeft } from 'lucide-react-native';
 import { COLORS, SIZES } from '../constants/theme';
+import { supabase } from '../api/supabase';
+import { useAuthStore } from '../store/useAuthStore';
 
 export default function QuestionnaireScreen() {
   const navigation = useNavigation<any>();
+  const { user } = useAuthStore();
+  const [questions, setQuestions] = useState<any[]>([]);
+  const [currentIdx, setCurrentIdx] = useState(0);
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
 
-  const OPTIONS = [
+  useEffect(() => {
+    fetchQuestions();
+  }, []);
+
+  const fetchQuestions = async () => {
+    const { data, error } = await supabase
+      .from('questions')
+      .select('*')
+      .eq('is_active', true)
+      .order('id', { ascending: true });
+
+    if (error) {
+      Alert.alert('Error', 'Failed to load questions.');
+    } else {
+      setQuestions(data || []);
+    }
+    setLoading(false);
+  };
+
+  const handleSubmitAnswer = async () => {
+    if (selectedOption === null || !user) return;
+
+    setSubmitting(true);
+    const question = questions[currentIdx];
+
+    const { error } = await supabase
+      .from('user_answers')
+      .upsert({
+        user_id: user.id,
+        question_id: question.id,
+        answer_value: selectedOption,
+      });
+
+    setSubmitting(false);
+
+    if (error) {
+      Alert.alert('Error', error.message);
+    } else {
+      if (currentIdx < questions.length - 1) {
+        setCurrentIdx(prev => prev + 1);
+        setSelectedOption(null);
+      } else {
+        navigation.reset({
+          index: 0,
+          routes: [{ name: 'MainTabs' }],
+        });
+      }
+    }
+  };
+
+  if (loading) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+      </View>
+    );
+  }
+
+  if (questions.length === 0) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: 20 }]}>
+        <Text style={{ textAlign: 'center', marginBottom: 20 }}>No questions available right now. You can skip this for now.</Text>
+        <TouchableOpacity style={styles.button} onPress={() => navigation.navigate('MainTabs')}>
+          <Text style={styles.buttonText}>Go to Home</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  const currentQuestion = questions[currentIdx];
+  const options = currentQuestion.options || [
     'Staying in and watching a movie',
     'Going out to a loud party',
     'Exploring a new part of the city',
@@ -26,15 +103,15 @@ export default function QuestionnaireScreen() {
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
             <ChevronLeft color={COLORS.primary} size={28} />
           </TouchableOpacity>
-          <Text style={styles.progressText}>Question 1 of 10</Text>
+          <Text style={styles.progressText}>Question {currentIdx + 1} of {questions.length}</Text>
         </View>
 
         <View style={styles.content}>
-          <Text style={styles.questionTitle}>What is your ideal Friday night?</Text>
+          <Text style={styles.questionTitle}>{currentQuestion.text}</Text>
           <Text style={styles.questionSubtitle}>This helps us find the best matches for you.</Text>
 
           <View style={styles.optionsContainer}>
-            {OPTIONS.map((option, index) => (
+            {options.map((option: string, index: number) => (
               <TouchableOpacity 
                 key={index} 
                 style={[
@@ -54,17 +131,13 @@ export default function QuestionnaireScreen() {
           </View>
 
           <TouchableOpacity 
-            style={[styles.button, selectedOption === null && styles.buttonDisabled]}
-            disabled={selectedOption === null}
-            onPress={() => {
-              // Usually goes to next question, but for dummy we just go to MainTabs
-              navigation.reset({
-                index: 0,
-                routes: [{ name: 'MainTabs' }],
-              });
-            }}
+            style={[styles.button, (selectedOption === null || submitting) && styles.buttonDisabled]}
+            disabled={selectedOption === null || submitting}
+            onPress={handleSubmitAnswer}
           >
-            <Text style={styles.buttonText}>Submit</Text>
+            {submitting ? <ActivityIndicator color={COLORS.white} /> : <Text style={styles.buttonText}>
+              {currentIdx < questions.length - 1 ? 'Next' : 'Finish'}
+            </Text>}
           </TouchableOpacity>
         </View>
       </SafeAreaView>

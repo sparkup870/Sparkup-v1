@@ -1,12 +1,98 @@
-import React from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, SafeAreaView } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, Image, TouchableOpacity, SafeAreaView, ActivityIndicator, Alert } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Search, MapPin } from 'lucide-react-native';
 import { COLORS, SIZES } from '../constants/theme';
 import { useNavigation } from '@react-navigation/native';
+import { supabase } from '../api/supabase';
+import { useAuthStore } from '../store/useAuthStore';
 
 export default function HomeScreen() {
   const navigation = useNavigation<any>();
+  const { user } = useAuthStore();
+  const [profiles, setProfiles] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [currentIdx, setCurrentIdx] = useState(0);
+
+  useEffect(() => {
+    fetchProfiles();
+  }, []);
+
+  const fetchProfiles = async () => {
+    if (!user) return;
+
+    // Get profiles that I haven't swiped on yet
+    const { data: swipedIds } = await supabase
+      .from('swipes')
+      .select('swiped_id')
+      .eq('swiper_id', user.id);
+
+    const excludedIds = (swipedIds || []).map(s => s.swiped_id);
+    excludedIds.push(user.id); // Exclude self
+
+    const { data, error } = await supabase
+      .from('users')
+      .select('*')
+      .not('id', 'in', `(${excludedIds.join(',')})`)
+      .limit(10);
+
+    if (error) {
+      console.error(error);
+    } else {
+      setProfiles(data || []);
+    }
+    setLoading(false);
+  };
+
+  const handleSwipe = async (action: 'reject' | 'right' | 'super') => {
+    if (!user || profiles.length === 0) return;
+
+    const swipedUser = profiles[currentIdx];
+
+    const { error } = await supabase
+      .from('swipes')
+      .insert({
+        swiper_id: user.id,
+        swiped_id: swipedUser.id,
+        action: action
+      });
+
+    if (error) {
+      Alert.alert('Error', error.message);
+      return;
+    }
+
+    // Check if a match was created by our DB trigger
+    if (action !== 'reject') {
+      const { data: matchData } = await supabase
+        .from('matches')
+        .select('*')
+        .or(`and(user1_id.eq.${user.id},user2_id.eq.${swipedUser.id}),and(user1_id.eq.${swipedUser.id},user2_id.eq.${user.id})`)
+        .single();
+
+      if (matchData) {
+        navigation.navigate('MatchModal', { match: matchData, otherUser: swipedUser });
+      }
+    }
+
+    if (currentIdx < profiles.length - 1) {
+      setCurrentIdx(prev => prev + 1);
+    } else {
+      // No more profiles in current batch
+      setProfiles([]);
+      fetchProfiles();
+    }
+  };
+
+  if (loading) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+      </View>
+    );
+  }
+
+  const currentProfile = profiles[currentIdx];
 
   return (
     <LinearGradient
@@ -32,53 +118,53 @@ export default function HomeScreen() {
 
         {/* Profile Card */}
         <View style={styles.cardContainer}>
-          <View style={styles.card}>
-            <Image 
-              source={{ uri: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=800&q=80' }} 
-              style={styles.cardImage} 
-            />
-            <LinearGradient
-              colors={['transparent', 'rgba(0,0,0,0.8)']}
-              style={styles.cardOverlay}
-            >
-              <View style={styles.badgeLike}>
-                <Text style={styles.badgeLikeText}>She likes you!</Text>
-              </View>
+          {currentProfile ? (
+            <View style={styles.card}>
+              <Image 
+                source={{ uri: currentProfile.avatar_url || 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=800&q=80' }} 
+                style={styles.cardImage} 
+              />
+              <LinearGradient
+                colors={['transparent', 'rgba(0,0,0,0.8)']}
+                style={styles.cardOverlay}
+              >
+                <View style={styles.cardContent}>
+                  <View style={styles.locationBadge}>
+                    <MapPin color={COLORS.white} size={14} />
+                    <Text style={styles.locationText}>{currentProfile.university_domain || 'Campus'}</Text>
+                  </View>
+                  
+                  <View style={styles.nameRow}>
+                    <Text style={styles.nameText}>{currentProfile.name}</Text>
+                  </View>
 
-              <View style={styles.cardContent}>
-                <View style={styles.locationBadge}>
-                  <MapPin color={COLORS.white} size={14} />
-                  <Text style={styles.locationText}>California</Text>
+                  <Text style={styles.bioText} numberOfLines={2}>
+                    {currentProfile.bio}
+                  </Text>
                 </View>
-                
-                <View style={styles.nameRow}>
-                  <Text style={styles.nameText}>Julia</Text>
-                  <Text style={styles.ageText}>27</Text>
-                </View>
-
-                <Text style={styles.bioText} numberOfLines={2}>
-                  Hey there 👋. My name is Julia and I'm a fashion photographer. I love going to concerts and festivals.
-                </Text>
-
-                <View style={styles.chipsRow}>
-                  {['Aries', 'Photography', 'Fashion', 'Music'].map((chip, i) => (
-                    <View key={i} style={styles.chip}>
-                      <Text style={styles.chipText}>{chip}</Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-            </LinearGradient>
-          </View>
+              </LinearGradient>
+            </View>
+          ) : (
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+              <Text style={{ color: COLORS.secondary }}>No more profiles found. Check back later!</Text>
+            </View>
+          )}
         </View>
 
-        {/* Simulate Swipe / Match action */}
-        <TouchableOpacity 
-          style={{ position: 'absolute', bottom: 120, alignSelf: 'center', backgroundColor: COLORS.white, padding: 15, borderRadius: 30 }}
-          onPress={() => navigation.navigate('MatchModal')}
-        >
-          <Text style={{ color: COLORS.primary, fontWeight: 'bold' }}>Simulate Match</Text>
-        </TouchableOpacity>
+        {/* Actions */}
+        {currentProfile && (
+          <View style={styles.actionRow}>
+            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#FF6B6B' }]} onPress={() => handleSwipe('reject')}>
+              <Text style={styles.actionBtnText}>✕</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#4834DF' }]} onPress={() => handleSwipe('super')}>
+              <Text style={styles.actionBtnText}>★</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#6AB04C' }]} onPress={() => handleSwipe('right')}>
+              <Text style={styles.actionBtnText}>♥</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
       </SafeAreaView>
     </LinearGradient>
@@ -137,7 +223,7 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 20,
     paddingTop: 10,
-    paddingBottom: 100, // Space for tabs
+    paddingBottom: 20,
   },
   card: {
     flex: 1,
@@ -152,20 +238,8 @@ const styles = StyleSheet.create({
   },
   cardOverlay: {
     flex: 1,
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
     padding: 20,
-  },
-  badgeLike: {
-    backgroundColor: 'rgba(255,255,255,0.3)',
-    alignSelf: 'flex-start',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-  },
-  badgeLikeText: {
-    color: COLORS.white,
-    fontWeight: '600',
-    fontSize: 12,
   },
   cardContent: {
     justifyContent: 'flex-end',
@@ -197,33 +271,33 @@ const styles = StyleSheet.create({
     color: COLORS.white,
     marginRight: 10,
   },
-  ageText: {
-    fontSize: 24,
-    color: COLORS.white,
-    fontWeight: '600',
-    marginBottom: 5,
-  },
   bioText: {
     color: 'rgba(255,255,255,0.8)',
     fontSize: 14,
     lineHeight: 20,
     marginBottom: 15,
   },
-  chipsRow: {
+  actionRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    justifyContent: 'space-evenly',
+    alignItems: 'center',
+    paddingBottom: 110, // Space for tabs
   },
-  chip: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 15,
-    marginRight: 8,
-    marginBottom: 8,
+  actionBtn: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 10,
+    elevation: 5,
   },
-  chipText: {
+  actionBtnText: {
     color: COLORS.white,
-    fontSize: 12,
-    fontWeight: '500',
-  },
+    fontSize: 24,
+    fontWeight: 'bold',
+  }
 });

@@ -1,23 +1,113 @@
-import React from 'react';
-import { View, Text, StyleSheet, SafeAreaView, ScrollView, Image, TouchableOpacity } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, SafeAreaView, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useNavigation } from '@react-navigation/native';
 import { Search } from 'lucide-react-native';
 import { COLORS, SIZES } from '../constants/theme';
-
-const ACTIVE_MATCHES = [
-  { id: 1, image: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=150&q=80', online: true },
-  { id: 2, image: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=150&q=80', online: true },
-  { id: 3, image: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80', online: false },
-  { id: 4, image: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=150&q=80', online: false },
-];
-
-const CHATS = [
-  { id: 1, name: 'Julia', lastMessage: 'You : Hey Julia! How you doin?', time: '09:14 AM', unread: 0, image: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=150&q=80' },
-  { id: 2, name: 'Gloria', lastMessage: 'Thanks, I appreciate it. Hey, do you...', time: 'Yesterday', unread: 1, image: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=150&q=80' },
-  { id: 3, name: 'Jane', lastMessage: 'Same here. I\'ve been working on t...', time: 'Yesterday', unread: 3, image: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80' },
-];
+import { supabase } from '../api/supabase';
+import { useAuthStore } from '../store/useAuthStore';
 
 export default function ChatScreen() {
+  const navigation = useNavigation<any>();
+  const { user } = useAuthStore();
+  const [matches, setMatches] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchMatches();
+
+    // Subscribe to new matches
+    const channel = supabase
+      .channel('public:matches')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'matches' }, payload => {
+        fetchMatches();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  const fetchMatches = async () => {
+    if (!user) return;
+
+    const { data, error } = await supabase
+      .from('matches')
+      .select(`
+        id,
+        user1_id,
+        user2_id,
+        compatibility_score,
+        is_unlocked,
+        created_at,
+        user1:user1_id ( id, name, avatar_url, anonymous_id ),
+        user2:user2_id ( id, name, avatar_url, anonymous_id )
+      `)
+      .or(`user1_id.eq.${user.id},user2_id.eq.${user.id}`)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error(error);
+    } else {
+      const processedMatches = (data || []).map(m => {
+        const otherUser = m.user1_id === user.id ? m.user2 : m.user1;
+        return {
+          ...m,
+          otherUser
+        };
+      });
+      setMatches(processedMatches);
+    }
+    setLoading(false);
+  };
+
+  const renderActiveMatch = ({ item }: { item: any }) => (
+    <TouchableOpacity 
+      style={styles.activeAvatarContainer}
+      onPress={() => navigation.navigate('ChatDetail', { match: item, otherUser: item.otherUser })}
+    >
+      <Image 
+        source={{ uri: item.otherUser.avatar_url || 'https://i.pravatar.cc/150?img=3' }} 
+        style={styles.activeAvatar} 
+      />
+      <View style={styles.onlineDot}>
+        <Text style={{ color: COLORS.white, fontSize: 8, fontWeight: 'bold' }}>{item.compatibility_score}%</Text>
+      </View>
+    </TouchableOpacity>
+  );
+
+  const renderChatItem = ({ item }: { item: any }) => (
+    <TouchableOpacity 
+      style={styles.chatItem}
+      onPress={() => navigation.navigate('ChatDetail', { match: item, otherUser: item.otherUser })}
+    >
+      <Image 
+        source={{ uri: item.otherUser.avatar_url || 'https://i.pravatar.cc/150?img=12' }} 
+        style={styles.chatAvatar} 
+      />
+      <View style={styles.chatInfo}>
+        <View style={styles.chatHeader}>
+          <Text style={styles.chatName}>{item.otherUser.name}</Text>
+          <Text style={styles.chatTime}>Just now</Text>
+        </View>
+        <View style={styles.chatFooter}>
+          <Text style={styles.chatLastMessage} numberOfLines={1}>
+            You sparked a connection!
+          </Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+
+  if (loading) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+      </View>
+    );
+  }
+
   return (
     <LinearGradient
       colors={[COLORS.backgroundTop, COLORS.backgroundBottom]}
@@ -32,43 +122,32 @@ export default function ChatScreen() {
         </View>
 
         <View style={styles.contentContainer}>
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-            
-            {/* Active Matches */}
-            <Text style={styles.sectionTitle}>Active</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.activeScroll} contentContainerStyle={{ paddingHorizontal: SIZES.padding }}>
-              {ACTIVE_MATCHES.map((match) => (
-                <View key={match.id} style={styles.activeAvatarContainer}>
-                  <Image source={{ uri: match.image }} style={styles.activeAvatar} />
-                  {match.online && <View style={styles.onlineDot} />}
+          {matches.length > 0 ? (
+            <FlatList
+              data={matches}
+              keyExtractor={(item) => item.id.toString()}
+              ListHeaderComponent={
+                <View style={{ marginBottom: 25 }}>
+                  <Text style={styles.sectionTitle}>Active Sparks</Text>
+                  <FlatList
+                    data={matches}
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    keyExtractor={(item) => item.id.toString()}
+                    renderItem={renderActiveMatch}
+                    contentContainerStyle={{ paddingHorizontal: SIZES.padding }}
+                  />
                 </View>
-              ))}
-            </ScrollView>
-
-            {/* Chat List */}
-            <View style={styles.chatList}>
-              {CHATS.map((chat) => (
-                <TouchableOpacity key={chat.id} style={styles.chatItem}>
-                  <Image source={{ uri: chat.image }} style={styles.chatAvatar} />
-                  <View style={styles.chatInfo}>
-                    <View style={styles.chatHeader}>
-                      <Text style={styles.chatName}>{chat.name}</Text>
-                      <Text style={styles.chatTime}>{chat.time}</Text>
-                    </View>
-                    <View style={styles.chatFooter}>
-                      <Text style={styles.chatLastMessage} numberOfLines={1}>{chat.lastMessage}</Text>
-                      {chat.unread > 0 && (
-                        <View style={styles.unreadBadge}>
-                          <Text style={styles.unreadText}>{chat.unread}</Text>
-                        </View>
-                      )}
-                    </View>
-                  </View>
-                </TouchableOpacity>
-              ))}
+              }
+              renderItem={renderChatItem}
+              contentContainerStyle={styles.scrollContent}
+              showsVerticalScrollIndicator={false}
+            />
+          ) : (
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 }}>
+              <Text style={{ textAlign: 'center', color: COLORS.secondary }}>No matches yet. Start swiping to spark a connection!</Text>
             </View>
-            
-          </ScrollView>
+          )}
         </View>
       </SafeAreaView>
     </LinearGradient>
@@ -125,9 +204,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: SIZES.padding,
     marginBottom: 15,
   },
-  activeScroll: {
-    marginBottom: 25,
-  },
   activeAvatarContainer: {
     marginRight: 15,
     position: 'relative',
@@ -141,20 +217,20 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 0,
     bottom: 0,
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: COLORS.greenDot,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: COLORS.notification,
     borderWidth: 2,
     borderColor: COLORS.white,
-  },
-  chatList: {
-    paddingHorizontal: SIZES.padding,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   chatItem: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 20,
+    paddingHorizontal: SIZES.padding,
   },
   chatAvatar: {
     width: 50,
@@ -189,18 +265,5 @@ const styles = StyleSheet.create({
     color: COLORS.secondary,
     flex: 1,
     marginRight: 10,
-  },
-  unreadBadge: {
-    backgroundColor: COLORS.notification,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  unreadText: {
-    color: COLORS.white,
-    fontSize: 10,
-    fontWeight: 'bold',
   },
 });

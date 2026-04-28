@@ -1,13 +1,140 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, SafeAreaView, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, SafeAreaView, KeyboardAvoidingView, Platform, Alert, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import { ChevronLeft } from 'lucide-react-native';
 import { COLORS, SIZES } from '../constants/theme';
+import { supabase } from '../api/supabase';
 
 export default function LoginScreen() {
   const navigation = useNavigation<any>();
   const [email, setEmail] = useState('');
+  const [otp, setOtp] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const handleSendOTP = async () => {
+    const emailDomain = email.split('@')[1]?.toLowerCase();
+    
+    if (!emailDomain) {
+      Alert.alert('Invalid Email', 'Please enter a valid email address.');
+      return;
+    }
+
+    // Bypass logic for test accounts
+    if (emailDomain === 'bmscetest.com') {
+      setLoading(true);
+      const testPassword = 'BmsceTestUser!2026';
+      
+      // Try to sign in first
+      let { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password: testPassword,
+      });
+
+      // If user doesn't exist, sign them up
+      if (error && error.message.includes('Invalid login credentials')) {
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+          email,
+          password: testPassword,
+        });
+        error = signUpError;
+        data = signUpData as any;
+      }
+
+      setLoading(false);
+
+      if (error) {
+        Alert.alert('Test Login Error', error.message + '\n\nNote: If "Confirm Email" is enabled in Supabase, auto-login might fail for new test accounts.');
+      } else if (data?.session) {
+        // Check if profile exists
+        const { data: existingProfile } = await supabase
+          .from('users')
+          .select('id')
+          .eq('id', data.session.user.id)
+          .single();
+          
+        if (existingProfile) {
+          navigation.navigate('MainTabs');
+        } else {
+          navigation.navigate('ProfileSetup');
+        }
+      }
+      return;
+    }
+
+    // Domain validation for real users
+    const genericDomains = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com', 'aol.com'];
+    
+    if (genericDomains.includes(emailDomain)) {
+      Alert.alert('Invalid Email', 'Personal email addresses are not allowed. Please use your verified college email.');
+      return;
+    }
+
+    if (!emailDomain.endsWith('.edu') && !emailDomain.includes('college')) {
+      Alert.alert('Invalid Email', 'Please use a valid college email address ending in .edu');
+      return;
+    }
+
+    setLoading(true);
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: undefined,
+      }
+    });
+    setLoading(false);
+
+    if (error) {
+      Alert.alert('Error', error.message);
+    } else {
+      setOtpSent(true);
+      Alert.alert('Code Sent', 'Please check your email for the verification code.');
+    }
+  };
+
+  const handleVerifyOTP = async () => {
+    setLoading(true);
+    const { data: { session }, error } = await supabase.auth.verifyOtp({
+      email,
+      token: otp,
+      type: 'signup',
+    });
+    setLoading(false);
+
+    if (error) {
+      // Try 'login' type if 'signup' fails
+      setLoading(true);
+      const { data: { session: loginSession }, error: loginError } = await supabase.auth.verifyOtp({
+        email,
+        token: otp,
+        type: 'login',
+      });
+      setLoading(false);
+
+      if (loginError) {
+        Alert.alert('Error', loginError.message);
+        return;
+      }
+      
+      if (loginSession) {
+        navigation.navigate('MainTabs');
+      }
+    } else if (session) {
+      // Check if profile exists
+      const { data: existingProfile } = await supabase
+        .from('users')
+        .select('id')
+        .eq('id', session.user.id)
+        .single();
+        
+      if (existingProfile) {
+        navigation.navigate('MainTabs');
+      } else {
+        navigation.navigate('ProfileSetup');
+      }
+    }
+  };
 
   return (
     <LinearGradient
@@ -26,25 +153,62 @@ export default function LoginScreen() {
           </View>
 
           <View style={styles.content}>
-            <Text style={styles.title}>What's your college email?</Text>
-            <Text style={styles.subtitle}>We use this to verify you are a student. Your email will be kept private.</Text>
+            {!otpSent ? (
+              <>
+                <Text style={styles.title}>What's your college email?</Text>
+                <Text style={styles.subtitle}>We use this to verify you are a student. Your email will be kept private.</Text>
 
-            <TextInput
-              style={styles.input}
-              placeholder="name@college.edu"
-              placeholderTextColor={COLORS.secondary}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              value={email}
-              onChangeText={setEmail}
-            />
+                <TextInput
+                  style={styles.input}
+                  placeholder="name@college.edu"
+                  placeholderTextColor={COLORS.secondary}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  value={email}
+                  onChangeText={setEmail}
+                  disabled={loading}
+                />
 
-            <TouchableOpacity 
-              style={styles.button}
-              onPress={() => navigation.navigate('ProfileSetup')}
-            >
-              <Text style={styles.buttonText}>Send Verification Code</Text>
-            </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.button, loading && { opacity: 0.7 }]}
+                  onPress={handleSendOTP}
+                  disabled={loading}
+                >
+                  {loading ? <ActivityIndicator color={COLORS.white} /> : <Text style={styles.buttonText}>Send Verification Code</Text>}
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <Text style={styles.title}>Enter the code</Text>
+                <Text style={styles.subtitle}>We've sent a 6-digit code to {email}.</Text>
+
+                <TextInput
+                  style={styles.input}
+                  placeholder="000000"
+                  placeholderTextColor={COLORS.secondary}
+                  keyboardType="number-pad"
+                  maxLength={6}
+                  value={otp}
+                  onChangeText={setOtp}
+                  disabled={loading}
+                />
+
+                <TouchableOpacity 
+                  style={[styles.button, loading && { opacity: 0.7 }]}
+                  onPress={handleVerifyOTP}
+                  disabled={loading}
+                >
+                  {loading ? <ActivityIndicator color={COLORS.white} /> : <Text style={styles.buttonText}>Verify & Continue</Text>}
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={{ marginTop: 20, alignSelf: 'center' }}
+                  onPress={() => setOtpSent(false)}
+                >
+                  <Text style={{ color: COLORS.primary, fontWeight: '600' }}>Change Email</Text>
+                </TouchableOpacity>
+              </>
+            )}
           </View>
         </KeyboardAvoidingView>
       </SafeAreaView>
