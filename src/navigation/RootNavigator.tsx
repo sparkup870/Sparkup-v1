@@ -15,6 +15,7 @@ import QuestionnaireScreen from '../screens/QuestionnaireScreen';
 import GhostScreen from '../screens/GhostScreen';
 import PostsScreen from '../screens/PostsScreen';
 import ChatDetailScreen from '../screens/ChatDetailScreen';
+import ProfileScreen from '../screens/ProfileScreen';
 import { COLORS } from '../constants/theme';
 
 const Tab = createBottomTabNavigator();
@@ -86,6 +87,7 @@ export default function RootNavigator() {
           options={{ presentation: 'transparentModal', animation: 'fade' }} 
         />
         <Stack.Screen name="ChatDetail" component={ChatDetailScreen} />
+        <Stack.Screen name="Profile" component={ProfileScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

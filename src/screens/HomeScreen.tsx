@@ -1,18 +1,26 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity, SafeAreaView, ActivityIndicator, Alert } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Search, MapPin } from 'lucide-react-native';
 import { COLORS, SIZES } from '../constants/theme';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../api/supabase';
 import { useAuthStore } from '../store/useAuthStore';
 
 export default function HomeScreen() {
   const navigation = useNavigation<any>();
-  const { user } = useAuthStore();
+  const { user, profile, fetchProfile } = useAuthStore();
   const [profiles, setProfiles] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentIdx, setCurrentIdx] = useState(0);
+
+  // Re-fetch profile whenever this screen comes into focus
+  // so changes from ProfileScreen appear immediately
+  useFocusEffect(
+    useCallback(() => {
+      fetchProfile();
+    }, [user])
+  );
 
   useEffect(() => {
     fetchProfiles();
@@ -107,9 +115,9 @@ export default function HomeScreen() {
             <TouchableOpacity style={styles.iconCircle}>
               <Search color={COLORS.primary} size={20} />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.profileCircle}>
+            <TouchableOpacity style={styles.profileCircle} onPress={() => navigation.navigate('Profile')}>
               <Image 
-                source={{ uri: 'https://i.pravatar.cc/100?img=1' }} 
+                source={{ uri: profile?.avatar_url || 'https://i.pravatar.cc/100?img=1' }} 
                 style={styles.profileImage} 
               />
             </TouchableOpacity>

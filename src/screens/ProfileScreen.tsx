@@ -1,22 +1,29 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, SafeAreaView, ScrollView, Alert, ActivityIndicator, Image } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
-import { ChevronLeft, Camera } from 'lucide-react-native';
+import { ChevronLeft, Camera, LogOut } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { decode } from 'base64-arraybuffer';
 import { COLORS, SIZES } from '../constants/theme';
 import { supabase } from '../api/supabase';
 import { useAuthStore } from '../store/useAuthStore';
 
-export default function ProfileSetupScreen() {
+export default function ProfileScreen() {
   const navigation = useNavigation<any>();
-  const [name, setName] = useState('');
-  const [bio, setBio] = useState('');
+  const { user, profile, fetchProfile, signOut } = useAuthStore();
+
+  const [name, setName] = useState(profile?.name || '');
   const [loading, setLoading] = useState(false);
-  const [imageUri, setImageUri] = useState<string | null>(null);
+  const [imageUri, setImageUri] = useState<string | null>(profile?.avatar_url || null);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
-  const { user, fetchProfile } = useAuthStore();
+
+  useEffect(() => {
+    if (profile) {
+      setName(profile.name || '');
+      setImageUri(profile.avatar_url || null);
+    }
+  }, [profile]);
 
   const pickImage = async () => {
     let result = await ImagePicker.launchImageLibraryAsync({
@@ -41,9 +48,9 @@ export default function ProfileSetupScreen() {
     }
   };
 
-  const handleSaveProfile = async () => {
-    if (!name.trim() || !bio.trim()) {
-      Alert.alert('Missing Info', 'Please provide at least your name and bio.');
+  const handleSave = async () => {
+    if (!name.trim()) {
+      Alert.alert('Missing Info', 'Please provide your name.');
       return;
     }
 
@@ -52,9 +59,8 @@ export default function ProfileSetupScreen() {
     setLoading(true);
     
     try {
-      const emailDomain = user.email?.split('@')[1] || '';
-      
-      let uploadedAvatarUrl = 'https://i.pravatar.cc/150?img=' + Math.floor(Math.random() * 70);
+      let uploadedAvatarUrl = profile?.avatar_url;
+
       if (imageBase64) {
         const fileExt = imageUri?.split('.').pop() || 'jpg';
         const fileName = `${user.id}-${Date.now()}.${fileExt}`;
@@ -73,33 +79,43 @@ export default function ProfileSetupScreen() {
         uploadedAvatarUrl = publicUrlData.publicUrl;
       }
       
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('users')
-        .upsert({
-          id: user.id,
-          email: user.email,
-          university_domain: emailDomain,
+        .update({
           name: name.trim(),
-          anonymous_id: `User#${Math.floor(1000 + Math.random() * 9000)}`,
-          bio: bio.trim(),
           avatar_url: uploadedAvatarUrl,
-          is_verified: true, // Auto-verifying for MVP
-        }, { onConflict: 'id' });
+        })
+        .eq('id', user.id);
 
       if (error) {
         throw error;
       }
 
       await fetchProfile(); // Refresh store
-      
-      // Navigate to Questionnaire
-      navigation.navigate('Questionnaire');
+      Alert.alert('Success', 'Profile updated successfully!');
       
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Failed to save profile');
+      Alert.alert('Error', error.message || 'Failed to update profile');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleLogout = async () => {
+    Alert.alert('Log Out', 'Are you sure you want to log out?', [
+      { text: 'Cancel', style: 'cancel' },
+      { 
+        text: 'Log Out', 
+        style: 'destructive',
+        onPress: async () => {
+          await signOut();
+          navigation.reset({
+            index: 0,
+            routes: [{ name: 'Welcome' }],
+          });
+        }
+      }
+    ]);
   };
 
   return (
@@ -113,24 +129,25 @@ export default function ProfileSetupScreen() {
             <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
               <ChevronLeft color={COLORS.primary} size={28} />
             </TouchableOpacity>
+            <Text style={styles.headerTitle}>My Profile</Text>
+            <View style={{ width: 40 }} /> {/* Spacer */}
           </View>
 
           <View style={styles.content}>
-            <Text style={styles.title}>Set up your profile</Text>
-            <Text style={styles.subtitle}>Your image will be blurred to others until you mutually match and unlock.</Text>
-
-            <TouchableOpacity style={styles.avatarPlaceholder} onPress={pickImage}>
+            <TouchableOpacity style={styles.avatarContainer} onPress={pickImage}>
               {imageUri ? (
-                <Image source={{ uri: imageUri }} style={{ width: 120, height: 120, borderRadius: 60 }} />
+                <Image source={{ uri: imageUri }} style={styles.avatarImage} />
               ) : (
-                <>
+                <View style={styles.avatarPlaceholder}>
                   <Camera color={COLORS.secondary} size={40} />
-                  <Text style={styles.avatarText}>Add Photo</Text>
-                </>
+                </View>
               )}
+              <View style={styles.editBadge}>
+                <Camera color={COLORS.white} size={16} />
+              </View>
             </TouchableOpacity>
 
-            <Text style={styles.label}>First Name</Text>
+            <Text style={styles.label}>Name</Text>
             <TextInput
               style={styles.input}
               placeholder="e.g. Julia"
@@ -139,23 +156,17 @@ export default function ProfileSetupScreen() {
               onChangeText={setName}
             />
 
-            <Text style={styles.label}>Short Bio</Text>
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              placeholder="Tell us a bit about yourself..."
-              placeholderTextColor={COLORS.secondary}
-              multiline
-              numberOfLines={4}
-              value={bio}
-              onChangeText={setBio}
-            />
-
             <TouchableOpacity 
               style={[styles.button, loading && { opacity: 0.7 }]}
-              onPress={handleSaveProfile}
+              onPress={handleSave}
               disabled={loading}
             >
-              {loading ? <ActivityIndicator color={COLORS.white} /> : <Text style={styles.buttonText}>Continue</Text>}
+              {loading ? <ActivityIndicator color={COLORS.white} /> : <Text style={styles.buttonText}>Save Changes</Text>}
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+              <LogOut color="#FF3B30" size={20} style={{ marginRight: 10 }} />
+              <Text style={styles.logoutText}>Log Out</Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
@@ -169,9 +180,17 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1 },
   scrollContent: { flexGrow: 1 },
   header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     paddingHorizontal: SIZES.padding,
     paddingTop: 20,
-    marginBottom: 10,
+    marginBottom: 30,
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: COLORS.primary,
   },
   backButton: {
     width: 40,
@@ -183,35 +202,39 @@ const styles = StyleSheet.create({
     paddingHorizontal: SIZES.padding,
     paddingBottom: 40,
   },
-  title: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: COLORS.primary,
-    marginBottom: 10,
+  avatarContainer: {
+    alignSelf: 'center',
+    marginBottom: 40,
+    position: 'relative',
   },
-  subtitle: {
-    fontSize: 14,
-    color: COLORS.secondary,
-    lineHeight: 20,
-    marginBottom: 30,
+  avatarImage: {
+    width: 140,
+    height: 140,
+    borderRadius: 70,
   },
   avatarPlaceholder: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
+    width: 140,
+    height: 140,
+    borderRadius: 70,
     backgroundColor: COLORS.white,
-    alignSelf: 'center',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 40,
     borderWidth: 2,
     borderColor: 'rgba(0,0,0,0.05)',
     borderStyle: 'dashed',
   },
-  avatarText: {
-    marginTop: 10,
-    color: COLORS.secondary,
-    fontWeight: '600',
+  editBadge: {
+    position: 'absolute',
+    bottom: 0,
+    right: 5,
+    backgroundColor: COLORS.primary,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 3,
+    borderColor: COLORS.backgroundTop,
   },
   label: {
     fontSize: 16,
@@ -225,16 +248,12 @@ const styles = StyleSheet.create({
     padding: 18,
     fontSize: 16,
     color: COLORS.primary,
-    marginBottom: 25,
+    marginBottom: 30,
     shadowColor: '#000',
     shadowOpacity: 0.05,
     shadowOffset: { width: 0, height: 2 },
     shadowRadius: 5,
     elevation: 2,
-  },
-  textArea: {
-    height: 100,
-    textAlignVertical: 'top',
   },
   button: {
     backgroundColor: COLORS.primary,
@@ -242,7 +261,7 @@ const styles = StyleSheet.create({
     paddingVertical: 18,
     borderRadius: 30,
     alignItems: 'center',
-    marginTop: 20,
+    marginBottom: 30,
     shadowColor: '#000',
     shadowOpacity: 0.1,
     shadowOffset: { width: 0, height: 4 },
@@ -251,6 +270,19 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: COLORS.white,
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  logoutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 18,
+    borderRadius: 30,
+    backgroundColor: 'rgba(255, 59, 48, 0.1)',
+  },
+  logoutText: {
+    color: '#FF3B30',
     fontSize: 18,
     fontWeight: 'bold',
   },

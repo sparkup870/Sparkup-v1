@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, SafeAreaView, ActivityIndicator } from 'react-native';
+import React, { useEffect, useState, useCallback } from 'react';
+import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, SafeAreaView, ActivityIndicator, RefreshControl } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Search } from 'lucide-react-native';
 import { COLORS, SIZES } from '../constants/theme';
 import { supabase } from '../api/supabase';
@@ -12,11 +12,17 @@ export default function ChatScreen() {
   const { user } = useAuthStore();
   const [matches, setMatches] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Refetch whenever this tab comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      fetchMatches();
+    }, [user])
+  );
 
   useEffect(() => {
-    fetchMatches();
-
-    // Subscribe to new matches
+    // Subscribe to new matches in real-time
     const channel = supabase
       .channel('public:matches')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'matches' }, payload => {
@@ -60,6 +66,7 @@ export default function ChatScreen() {
       setMatches(processedMatches);
     }
     setLoading(false);
+    setRefreshing(false);
   };
 
   const renderActiveMatch = ({ item }: { item: any }) => (
@@ -126,6 +133,16 @@ export default function ChatScreen() {
             <FlatList
               data={matches}
               keyExtractor={(item) => item.id.toString()}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={() => {
+                    setRefreshing(true);
+                    fetchMatches();
+                  }}
+                  tintColor={COLORS.primary}
+                />
+              }
               ListHeaderComponent={
                 <View style={{ marginBottom: 25 }}>
                   <Text style={styles.sectionTitle}>Active Sparks</Text>

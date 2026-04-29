@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, SafeAreaView, KeyboardAvoidingView, Platform, Image } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Image } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft, Send } from 'lucide-react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { supabase } from '../api/supabase';
@@ -11,6 +12,7 @@ export default function ChatDetailScreen() {
   const route = useRoute<any>();
   const { user } = useAuthStore();
   const { match, otherUser } = route.params;
+  const insets = useSafeAreaInsets();
   
   const [messages, setMessages] = useState<any[]>([]);
   const [inputText, setInputText] = useState('');
@@ -28,7 +30,13 @@ export default function ChatDetailScreen() {
         table: 'messages',
         filter: `match_id=eq.${match.id}`
       }, payload => {
-        setMessages(prev => [payload.new, ...prev]);
+        // Only add if we don't already have this message (deduplication)
+        // This prevents the sender seeing a duplicate from the realtime event
+        setMessages(prev => {
+          const exists = prev.some(m => m.id === payload.new.id);
+          if (exists) return prev;
+          return [payload.new, ...prev];
+        });
       })
       .subscribe();
 
@@ -52,20 +60,33 @@ export default function ChatDetailScreen() {
   const handleSendMessage = async () => {
     if (!inputText.trim() || !user) return;
 
-    const newMessage = {
-      match_id: match.id,
-      sender_id: user.id,
-      text: inputText.trim(),
-    };
-
+    const text = inputText.trim();
     setInputText('');
 
-    const { error } = await supabase
+    // Optimistic update: add message immediately to UI
+    const tempId = `temp-${Date.now()}`;
+    const optimisticMessage = {
+      id: tempId,
+      match_id: match.id,
+      sender_id: user.id,
+      text,
+      created_at: new Date().toISOString(),
+    };
+    setMessages(prev => [optimisticMessage, ...prev]);
+
+    const { data, error } = await supabase
       .from('messages')
-      .insert(newMessage);
+      .insert({ match_id: match.id, sender_id: user.id, text })
+      .select()
+      .single();
 
     if (error) {
+      // Rollback on failure
+      setMessages(prev => prev.filter(m => m.id !== tempId));
       console.error(error);
+    } else if (data) {
+      // Replace temp message with the real one from DB
+      setMessages(prev => prev.map(m => m.id === tempId ? data : m));
     }
   };
 
@@ -83,17 +104,23 @@ export default function ChatDetailScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <ChevronLeft color={COLORS.primary} size={28} />
-        </TouchableOpacity>
-        <Image source={{ uri: otherUser.avatar_url || 'https://i.pravatar.cc/150?img=3' }} style={styles.avatar} />
-        <View style={styles.headerInfo}>
-          <Text style={styles.name}>{otherUser.name}</Text>
-          <Text style={styles.status}>Online</Text>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+    >
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+            <ChevronLeft color={COLORS.primary} size={28} />
+          </TouchableOpacity>
+          <Image source={{ uri: otherUser.avatar_url || 'https://i.pravatar.cc/150?img=3' }} style={styles.avatar} />
+          <View style={styles.headerInfo}>
+            <Text style={styles.name}>{otherUser.name}</Text>
+            <Text style={styles.status}>Online</Text>
+          </View>
         </View>
-      </View>
+      </SafeAreaView>
 
       <FlatList
         ref={flatListRef}
@@ -104,34 +131,32 @@ export default function ChatDetailScreen() {
         contentContainerStyle={styles.messageList}
       />
 
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-      >
-        <View style={styles.inputContainer}>
-          <TextInput
-            style={styles.input}
-            placeholder="Type a message..."
-            value={inputText}
-            onChangeText={setInputText}
-            multiline
-          />
-          <TouchableOpacity 
-            style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]} 
-            onPress={handleSendMessage}
-            disabled={!inputText.trim()}
-          >
-            <Send color={COLORS.white} size={20} />
-          </TouchableOpacity>
-        </View>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+      <View style={[styles.inputContainer, { paddingBottom: insets.bottom + 10 }]}>
+        <TextInput
+          style={styles.input}
+          placeholder="Type a message..."
+          value={inputText}
+          onChangeText={setInputText}
+          multiline
+        />
+        <TouchableOpacity 
+          style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]} 
+          onPress={handleSendMessage}
+          disabled={!inputText.trim()}
+        >
+          <Send color={COLORS.white} size={20} />
+        </TouchableOpacity>
+      </View>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: COLORS.white,
+  },
+  safeArea: {
     backgroundColor: COLORS.white,
   },
   header: {
