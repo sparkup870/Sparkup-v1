@@ -175,7 +175,7 @@ export default function HomeScreen() {
                   </View>
                   
                   <View style={styles.nameRow}>
-                    <Text style={styles.nameText}>{currentProfile.name}</Text>
+                    <Text style={styles.nameText}>{currentProfile.name || ''}</Text>
                     {isOnline(currentProfile.last_seen) && (
                       <View style={styles.activeBadge}>
                         <View style={styles.activeDot} />
@@ -185,7 +185,7 @@ export default function HomeScreen() {
                   </View>
 
                   <Text style={styles.bioText} numberOfLines={2}>
-                    {currentProfile.bio}
+                    {currentProfile.bio || ''}
                   </Text>
                 </View>
               </LinearGradient>
@@ -227,10 +227,10 @@ export default function HomeScreen() {
               <Text style={styles.actionBtnText}>✕</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#4834DF' }]} onPress={() => handleSwipe('super')}>
-              <Text style={styles.actionBtnText}>★</Text>
+              <Text style={styles.actionBtnText}>✨</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#6AB04C' }]} onPress={() => handleSwipe('right')}>
-              <Text style={styles.actionBtnText}>♥</Text>
+              <Text style={styles.actionBtnText}>💖</Text>
             </TouchableOpacity>
           </View>
         )}

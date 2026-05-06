@@ -131,7 +131,7 @@ export default function ProfileScreen() {
               <ChevronLeft color={COLORS.primary} size={28} />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>My Profile</Text>
-            <View style={{ width: 40 }} /> {/* Spacer */}
+            <View style={{ width: 40 }} />
           </View>
 
           <View style={styles.content}>

@@ -123,7 +123,7 @@ export default function ChatDetailScreen() {
           </TouchableOpacity>
           <Image source={{ uri: otherUser.avatar_url || 'https://i.pravatar.cc/150?img=3' }} style={styles.avatar} />
           <View style={styles.headerInfo}>
-            <Text style={styles.name}>{otherUser.name}</Text>
+            <Text style={styles.name}>{otherUser.name || ''}</Text>
             <Text style={[styles.status, !isOnline(otherUser.last_seen) && { color: COLORS.secondary }]}>
               {isOnline(otherUser.last_seen) ? 'Active now' : 'Offline'}
             </Text>
