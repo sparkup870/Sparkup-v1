@@ -21,7 +21,28 @@ export default function App() {
       setUser(session?.user ?? null);
     });
 
-    return () => subscription.unsubscribe();
+    // Activity tracking
+    const updateActivity = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          await supabase
+            .from('users')
+            .update({ last_seen: new Date().toISOString() })
+            .eq('id', session.user.id);
+        }
+      } catch (err) {
+        console.warn('Failed to update activity:', err);
+      }
+    };
+
+    updateActivity();
+    const activityInterval = setInterval(updateActivity, 60000);
+
+    return () => {
+      subscription.unsubscribe();
+      clearInterval(activityInterval);
+    };
   }, []);
 
   return (

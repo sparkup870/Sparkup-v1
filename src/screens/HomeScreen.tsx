@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, SafeAreaView, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, Image, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Search, MapPin } from 'lucide-react-native';
+import { MapPin } from 'lucide-react-native';
 import { COLORS, SIZES } from '../constants/theme';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../api/supabase';
@@ -13,6 +14,15 @@ export default function HomeScreen() {
   const [profiles, setProfiles] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentIdx, setCurrentIdx] = useState(0);
+  const [isReviewMode, setIsReviewMode] = useState(false);
+
+  const isOnline = (lastSeen: string | null) => {
+    if (!lastSeen) return false;
+    const lastSeenDate = new Date(lastSeen);
+    const now = new Date();
+    const diff = (now.getTime() - lastSeenDate.getTime()) / 1000 / 60;
+    return diff < 5;
+  };
 
   // Re-fetch profile whenever this screen comes into focus
   // so changes from ProfileScreen appear immediately
@@ -26,29 +36,54 @@ export default function HomeScreen() {
     fetchProfiles();
   }, []);
 
-  const fetchProfiles = async () => {
+  const fetchProfiles = async (reviewMode = isReviewMode) => {
     if (!user) return;
+    setLoading(true);
 
-    // Get profiles that I haven't swiped on yet
-    const { data: swipedIds } = await supabase
-      .from('swipes')
-      .select('swiped_id')
-      .eq('swiper_id', user.id);
+    if (reviewMode) {
+      // Get profiles that I rejected
+      const { data: rejectedSwipes } = await supabase
+        .from('swipes')
+        .select('swiped_id')
+        .eq('swiper_id', user.id)
+        .eq('action', 'reject');
 
-    const excludedIds = (swipedIds || []).map(s => s.swiped_id);
-    excludedIds.push(user.id); // Exclude self
+      const rejectedIds = (rejectedSwipes || []).map(s => s.swiped_id);
 
-    const { data, error } = await supabase
-      .from('users')
-      .select('*')
-      .not('id', 'in', `(${excludedIds.join(',')})`)
-      .limit(10);
+      if (rejectedIds.length === 0) {
+        setProfiles([]);
+        setLoading(false);
+        return;
+      }
 
-    if (error) {
-      console.error(error);
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .in('id', rejectedIds)
+        .limit(10);
+
+      if (error) console.error(error);
+      else setProfiles(data || []);
     } else {
-      setProfiles(data || []);
+      // Get profiles that I haven't swiped on yet
+      const { data: swipedIds } = await supabase
+        .from('swipes')
+        .select('swiped_id')
+        .eq('swiper_id', user.id);
+
+      const excludedIds = (swipedIds || []).map(s => s.swiped_id);
+      excludedIds.push(user.id);
+
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .not('id', 'in', `(${excludedIds.join(',')})`)
+        .limit(10);
+
+      if (error) console.error(error);
+      else setProfiles(data || []);
     }
+    setCurrentIdx(0);
     setLoading(false);
   };
 
@@ -59,11 +94,11 @@ export default function HomeScreen() {
 
     const { error } = await supabase
       .from('swipes')
-      .insert({
+      .upsert({
         swiper_id: user.id,
         swiped_id: swipedUser.id,
         action: action
-      });
+      }, { onConflict: 'swiper_id,swiped_id' });
 
     if (error) {
       Alert.alert('Error', error.message);
@@ -112,9 +147,6 @@ export default function HomeScreen() {
         <View style={styles.header}>
           <Text style={styles.logoText}>SparkUp</Text>
           <View style={styles.headerIcons}>
-            <TouchableOpacity style={styles.iconCircle}>
-              <Search color={COLORS.primary} size={20} />
-            </TouchableOpacity>
             <TouchableOpacity style={styles.profileCircle} onPress={() => navigation.navigate('Profile')}>
               <Image 
                 source={{ uri: profile?.avatar_url || 'https://i.pravatar.cc/100?img=1' }} 
@@ -144,6 +176,12 @@ export default function HomeScreen() {
                   
                   <View style={styles.nameRow}>
                     <Text style={styles.nameText}>{currentProfile.name}</Text>
+                    {isOnline(currentProfile.last_seen) && (
+                      <View style={styles.activeBadge}>
+                        <View style={styles.activeDot} />
+                        <Text style={styles.activeText}>Active now</Text>
+                      </View>
+                    )}
                   </View>
 
                   <Text style={styles.bioText} numberOfLines={2}>
@@ -153,8 +191,31 @@ export default function HomeScreen() {
               </LinearGradient>
             </View>
           ) : (
-            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-              <Text style={{ color: COLORS.secondary }}>No more profiles found. Check back later!</Text>
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyTitle}>No more profiles left!</Text>
+              <Text style={styles.emptySubtitle}>You've seen everyone in your area for now.</Text>
+              
+              {!isReviewMode ? (
+                <TouchableOpacity 
+                  style={styles.reviewButton} 
+                  onPress={() => {
+                    setIsReviewMode(true);
+                    fetchProfiles(true);
+                  }}
+                >
+                  <Text style={styles.reviewButtonText}>Review Rejected Profiles</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity 
+                  style={styles.reviewButton} 
+                  onPress={() => {
+                    setIsReviewMode(false);
+                    fetchProfiles(false);
+                  }}
+                >
+                  <Text style={styles.reviewButtonText}>Back to New Profiles</Text>
+                </TouchableOpacity>
+              )}
             </View>
           )}
         </View>
@@ -284,6 +345,64 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     marginBottom: 15,
+  },
+  activeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(106, 176, 76, 0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 10,
+    marginBottom: 8,
+  },
+  activeDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#6AB04C',
+    marginRight: 6,
+  },
+  activeText: {
+    color: '#6AB04C',
+    fontSize: 10,
+    fontWeight: 'bold',
+    textTransform: 'uppercase',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  emptyTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: COLORS.primary,
+    marginBottom: 10,
+  },
+  emptySubtitle: {
+    fontSize: 16,
+    color: COLORS.secondary,
+    textAlign: 'center',
+    marginBottom: 30,
+  },
+  reviewButton: {
+    backgroundColor: COLORS.white,
+    paddingHorizontal: 25,
+    paddingVertical: 15,
+    borderRadius: 30,
+    borderWidth: 2,
+    borderColor: COLORS.primary,
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 10,
+    elevation: 3,
+  },
+  reviewButtonText: {
+    color: COLORS.primary,
+    fontWeight: 'bold',
+    fontSize: 16,
   },
   actionRow: {
     flexDirection: 'row',

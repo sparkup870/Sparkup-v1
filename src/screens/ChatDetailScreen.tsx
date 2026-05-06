@@ -14,11 +14,18 @@ export default function ChatDetailScreen() {
   const { match, otherUser } = route.params;
   const insets = useSafeAreaInsets();
   
-  const [messages, setMessages] = useState<any[]>([]);
-  const [inputText, setInputText] = useState('');
-  const flatListRef = useRef<FlatList>(null);
+  const isOnline = (lastSeen: string | null) => {
+    if (!lastSeen) return false;
+    const lastSeenDate = new Date(lastSeen);
+    const now = new Date();
+    const diff = (now.getTime() - lastSeenDate.getTime()) / 1000 / 60;
+    return diff < 5;
+  };
+  const [messages, setMessages] = React.useState<any[]>([]);
+  const [inputText, setInputText] = React.useState('');
+  const flatListRef = React.useRef<FlatList>(null);
 
-  useEffect(() => {
+  React.useEffect(() => {
     fetchMessages();
 
     // Subscribe to real-time messages for THIS match
@@ -106,7 +113,7 @@ export default function ChatDetailScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
     >
       <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -117,7 +124,9 @@ export default function ChatDetailScreen() {
           <Image source={{ uri: otherUser.avatar_url || 'https://i.pravatar.cc/150?img=3' }} style={styles.avatar} />
           <View style={styles.headerInfo}>
             <Text style={styles.name}>{otherUser.name}</Text>
-            <Text style={styles.status}>Online</Text>
+            <Text style={[styles.status, !isOnline(otherUser.last_seen) && { color: COLORS.secondary }]}>
+              {isOnline(otherUser.last_seen) ? 'Active now' : 'Offline'}
+            </Text>
           </View>
         </View>
       </SafeAreaView>

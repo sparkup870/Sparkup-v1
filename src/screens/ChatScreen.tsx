@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, SafeAreaView, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { Search } from 'lucide-react-native';
 import { COLORS, SIZES } from '../constants/theme';
 import { supabase } from '../api/supabase';
 import { useAuthStore } from '../store/useAuthStore';
@@ -13,6 +13,14 @@ export default function ChatScreen() {
   const [matches, setMatches] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  const isOnline = (lastSeen: string | null) => {
+    if (!lastSeen) return false;
+    const lastSeenDate = new Date(lastSeen);
+    const now = new Date();
+    const diff = (now.getTime() - lastSeenDate.getTime()) / 1000 / 60;
+    return diff < 5;
+  };
 
   // Refetch whenever this tab comes into focus
   useFocusEffect(
@@ -47,8 +55,8 @@ export default function ChatScreen() {
         compatibility_score,
         is_unlocked,
         created_at,
-        user1:user1_id ( id, name, avatar_url, anonymous_id ),
-        user2:user2_id ( id, name, avatar_url, anonymous_id )
+        user1:user1_id ( id, name, avatar_url, anonymous_id, last_seen ),
+        user2:user2_id ( id, name, avatar_url, anonymous_id, last_seen )
       `)
       .or(`user1_id.eq.${user.id},user2_id.eq.${user.id}`)
       .order('created_at', { ascending: false });
@@ -78,7 +86,7 @@ export default function ChatScreen() {
         source={{ uri: item.otherUser.avatar_url || 'https://i.pravatar.cc/150?img=3' }} 
         style={styles.activeAvatar} 
       />
-      <View style={styles.onlineDot}>
+      <View style={[styles.onlineDot, { backgroundColor: isOnline(item.otherUser.last_seen) ? '#6AB04C' : COLORS.secondary }]}>
         <Text style={{ color: COLORS.white, fontSize: 8, fontWeight: 'bold' }}>{item.compatibility_score}%</Text>
       </View>
     </TouchableOpacity>
@@ -96,7 +104,7 @@ export default function ChatScreen() {
       <View style={styles.chatInfo}>
         <View style={styles.chatHeader}>
           <Text style={styles.chatName}>{item.otherUser.name}</Text>
-          <Text style={styles.chatTime}>Just now</Text>
+          <Text style={styles.chatTime}>{isOnline(item.otherUser.last_seen) ? 'Active now' : 'Offline'}</Text>
         </View>
         <View style={styles.chatFooter}>
           <Text style={styles.chatLastMessage} numberOfLines={1}>
@@ -123,9 +131,6 @@ export default function ChatScreen() {
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.header}>
           <Text style={styles.title}>Chats</Text>
-          <TouchableOpacity style={styles.iconCircle}>
-            <Search color={COLORS.primary} size={20} />
-          </TouchableOpacity>
         </View>
 
         <View style={styles.contentContainer}>
@@ -150,7 +155,7 @@ export default function ChatScreen() {
                     data={matches}
                     horizontal
                     showsHorizontalScrollIndicator={false}
-                    keyExtractor={(item) => item.id.toString()}
+                    keyExtractor={(item) => `active-${item.id}`}
                     renderItem={renderActiveMatch}
                     contentContainerStyle={{ paddingHorizontal: SIZES.padding }}
                   />
