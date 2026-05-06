@@ -16,6 +16,7 @@ import GhostScreen from '../screens/GhostScreen';
 import PostsScreen from '../screens/PostsScreen';
 import ChatDetailScreen from '../screens/ChatDetailScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import PersonalityTestScreen from '../screens/PersonalityTestScreen';
 import { COLORS } from '../constants/theme';
 
 const Tab = createBottomTabNavigator();
@@ -32,36 +33,36 @@ function TabNavigator() {
         tabBarInactiveTintColor: COLORS.secondary,
       }}
     >
-      <Tab.Screen 
-        name="HomeTab" 
-        component={HomeScreen} 
+      <Tab.Screen
+        name="HomeTab"
+        component={HomeScreen}
         options={{
           tabBarIcon: ({ color, size }) => (
             <Home color={color} size={28} />
           ),
         }}
       />
-      <Tab.Screen 
-        name="ChatsTab" 
-        component={ChatScreen} 
+      <Tab.Screen
+        name="ChatsTab"
+        component={ChatScreen}
         options={{
           tabBarIcon: ({ color, size }) => (
             <MessageCircle color={color} size={28} />
           ),
         }}
       />
-      <Tab.Screen 
-        name="PostsTab" 
-        component={PostsScreen} 
+      <Tab.Screen
+        name="PostsTab"
+        component={PostsScreen}
         options={{
           tabBarIcon: ({ color, size }) => (
             <Compass color={color} size={28} />
           ),
         }}
       />
-      <Tab.Screen 
-        name="ProfileTab" 
-        component={GhostScreen} 
+      <Tab.Screen
+        name="ProfileTab"
+        component={GhostScreen}
         options={{
           tabBarIcon: ({ color, size }) => (
             <MapPin color={color} size={28} />
@@ -80,11 +81,12 @@ export default function RootNavigator() {
         <Stack.Screen name="Login" component={LoginScreen} />
         <Stack.Screen name="ProfileSetup" component={ProfileSetupScreen} />
         <Stack.Screen name="Questionnaire" component={QuestionnaireScreen} />
+        <Stack.Screen name="PersonalityTest" component={PersonalityTestScreen} />
         <Stack.Screen name="MainTabs" component={TabNavigator} />
-        <Stack.Screen 
-          name="MatchModal" 
-          component={MatchScreen} 
-          options={{ presentation: 'transparentModal', animation: 'fade' }} 
+        <Stack.Screen
+          name="MatchModal"
+          component={MatchScreen}
+          options={{ presentation: 'transparentModal', animation: 'fade' }}
         />
         <Stack.Screen name="ChatDetail" component={ChatDetailScreen} />
         <Stack.Screen name="Profile" component={ProfileScreen} />
