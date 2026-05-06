@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Alert,
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
-import { ChevronLeft, Camera, LogOut } from 'lucide-react-native';
+import { ChevronLeft, Camera, LogOut, Award } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { decode } from 'base64-arraybuffer';
 import { COLORS, SIZES } from '../constants/theme';
@@ -58,14 +58,14 @@ export default function ProfileScreen() {
     if (!user) return;
 
     setLoading(true);
-    
+
     try {
       let uploadedAvatarUrl = profile?.avatar_url;
 
       if (imageBase64) {
         const fileExt = imageUri?.split('.').pop() || 'jpg';
         const fileName = `${user.id}-${Date.now()}.${fileExt}`;
-        
+
         const { data: uploadData, error: uploadError } = await supabase.storage
           .from('avatars')
           .upload(fileName, decode(imageBase64), {
@@ -79,7 +79,7 @@ export default function ProfileScreen() {
         const { data: publicUrlData } = supabase.storage.from('avatars').getPublicUrl(fileName);
         uploadedAvatarUrl = publicUrlData.publicUrl;
       }
-      
+
       const { error } = await supabase
         .from('users')
         .update({
@@ -94,7 +94,7 @@ export default function ProfileScreen() {
 
       await fetchProfile(); // Refresh store
       Alert.alert('Success', 'Profile updated successfully!');
-      
+
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Failed to update profile');
     } finally {
@@ -105,8 +105,8 @@ export default function ProfileScreen() {
   const handleLogout = async () => {
     Alert.alert('Log Out', 'Are you sure you want to log out?', [
       { text: 'Cancel', style: 'cancel' },
-      { 
-        text: 'Log Out', 
+      {
+        text: 'Log Out',
         style: 'destructive',
         onPress: async () => {
           await signOut();
@@ -157,7 +157,20 @@ export default function ProfileScreen() {
               onChangeText={setName}
             />
 
-            <TouchableOpacity 
+            <TouchableOpacity
+              style={styles.personalityBtn}
+              onPress={() => navigation.navigate('PersonalityTest')}
+            >
+              <Award color={COLORS.primary} size={24} />
+              <View style={{ flex: 1, marginLeft: 15 }}>
+                <Text style={styles.personalityTitle}>
+                  {profile?.personality_type ? `You are a ${profile.personality_type}` : 'Take Personality Test'}
+                </Text>
+                <Text style={styles.personalitySub}>Find matches based on your vibe.</Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
               style={[styles.button, loading && { opacity: 0.7 }]}
               onPress={handleSave}
               disabled={loading}
@@ -273,6 +286,25 @@ const styles = StyleSheet.create({
     color: COLORS.white,
     fontSize: 18,
     fontWeight: 'bold',
+  },
+  personalityBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.white,
+    padding: 20,
+    borderRadius: 20,
+    marginBottom: 30,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  personalityTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: COLORS.primary,
+  },
+  personalitySub: {
+    fontSize: 12,
+    color: COLORS.secondary,
   },
   logoutButton: {
     flexDirection: 'row',

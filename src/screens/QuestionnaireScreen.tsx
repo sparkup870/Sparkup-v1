@@ -113,10 +113,10 @@ export default function QuestionnaireScreen() {
 
           <View style={styles.optionsContainer}>
             {options.map((option: string, index: number) => (
-              <TouchableOpacity 
-                key={index} 
+              <TouchableOpacity
+                key={index}
                 style={[
-                  styles.optionCard, 
+                  styles.optionCard,
                   selectedOption === index && styles.optionCardSelected
                 ]}
                 onPress={() => setSelectedOption(index)}
@@ -131,7 +131,7 @@ export default function QuestionnaireScreen() {
             ))}
           </View>
 
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.button, (selectedOption === null || submitting) && styles.buttonDisabled]}
             disabled={selectedOption === null || submitting}
             onPress={handleSubmitAnswer}

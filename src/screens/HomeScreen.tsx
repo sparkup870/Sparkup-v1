@@ -148,9 +148,9 @@ export default function HomeScreen() {
           <Text style={styles.logoText}>SparkUp</Text>
           <View style={styles.headerIcons}>
             <TouchableOpacity style={styles.profileCircle} onPress={() => navigation.navigate('Profile')}>
-              <Image 
-                source={{ uri: profile?.avatar_url || 'https://i.pravatar.cc/100?img=1' }} 
-                style={styles.profileImage} 
+              <Image
+                source={{ uri: profile?.avatar_url || 'https://i.pravatar.cc/100?img=1' }}
+                style={styles.profileImage}
               />
             </TouchableOpacity>
           </View>
@@ -160,9 +160,9 @@ export default function HomeScreen() {
         <View style={styles.cardContainer}>
           {currentProfile ? (
             <View style={styles.card}>
-              <Image 
-                source={{ uri: currentProfile.avatar_url || 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=800&q=80' }} 
-                style={styles.cardImage} 
+              <Image
+                source={{ uri: currentProfile.avatar_url || 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=800&q=80' }}
+                style={styles.cardImage}
               />
               <LinearGradient
                 colors={['transparent', 'rgba(0,0,0,0.8)']}
@@ -173,7 +173,7 @@ export default function HomeScreen() {
                     <MapPin color={COLORS.white} size={14} />
                     <Text style={styles.locationText}>{currentProfile.university_domain || 'Campus'}</Text>
                   </View>
-                  
+
                   <View style={styles.nameRow}>
                     <Text style={styles.nameText}>{currentProfile.name}</Text>
                     {isOnline(currentProfile.last_seen) && (
