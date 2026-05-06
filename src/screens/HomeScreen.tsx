@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { MapPin } from 'lucide-react-native';
+import { MapPin, Award } from 'lucide-react-native';
 import { COLORS, SIZES } from '../constants/theme';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../api/supabase';
@@ -169,9 +169,17 @@ export default function HomeScreen() {
                 style={styles.cardOverlay}
               >
                 <View style={styles.cardContent}>
-                  <View style={styles.locationBadge}>
-                    <MapPin color={COLORS.white} size={14} />
-                    <Text style={styles.locationText}>{currentProfile.university_domain || 'Campus'}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <View style={styles.locationBadge}>
+                      <MapPin color={COLORS.white} size={14} />
+                      <Text style={styles.locationText}>{currentProfile.university_domain || 'Campus'}</Text>
+                    </View>
+                    {currentProfile.personality_type && (
+                      <View style={[styles.locationBadge, { marginLeft: 10, backgroundColor: 'rgba(72, 52, 223, 0.4)' }]}>
+                        <Award color={COLORS.white} size={14} />
+                        <Text style={styles.locationText}>{currentProfile.personality_type}</Text>
+                      </View>
+                    )}
                   </View>
 
                   <View style={styles.nameRow}>

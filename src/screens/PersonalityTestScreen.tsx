@@ -147,7 +147,8 @@ export default function PersonalityTestScreen() {
             .eq('id', user.id);
 
         if (error) {
-            Alert.alert("Error", "Failed to save results");
+            console.error("Save results error:", error);
+            Alert.alert("Error", `Failed to save results: ${error.message}`);
             setLoading(false);
         } else {
             await fetchProfile();

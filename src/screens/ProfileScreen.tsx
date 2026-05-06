@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Alert,
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
-import { ChevronLeft, Camera, LogOut, Award } from 'lucide-react-native';
+import { ChevronLeft, Camera, LogOut, Award, Zap } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { decode } from 'base64-arraybuffer';
 import { COLORS, SIZES } from '../constants/theme';
@@ -147,6 +147,34 @@ export default function ProfileScreen() {
                 <Camera color={COLORS.white} size={16} />
               </View>
             </TouchableOpacity>
+            
+            {/* Personality Section */}
+            <TouchableOpacity 
+              style={styles.personalityCard}
+              onPress={() => navigation.navigate('PersonalityTest')}
+            >
+              <View style={styles.personalityHeader}>
+                <Award color={COLORS.primary} size={24} />
+                <Text style={styles.personalityTitle}>Personality Profile</Text>
+              </View>
+              {profile?.personality_type ? (
+                <View>
+                  <Text style={styles.typeText}>{profile.personality_type}</Text>
+                  <View style={styles.scorePills}>
+                    <View style={styles.scorePill}>
+                      <Zap color={COLORS.primary} size={12} />
+                      <Text style={styles.pillText}>Action: {profile.action_score}</Text>
+                    </View>
+                    <View style={styles.scorePill}>
+                      <Award color={COLORS.primary} size={12} />
+                      <Text style={styles.pillText}>Social: {profile.social_emotional_score}</Text>
+                    </View>
+                  </View>
+                </View>
+              ) : (
+                <Text style={styles.noTestText}>Take the personality test to unlock your profile insights!</Text>
+              )}
+            </TouchableOpacity>
 
             <Text style={styles.label}>Name</Text>
             <TextInput
@@ -249,6 +277,61 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 3,
     borderColor: COLORS.backgroundTop,
+  },
+  personalityCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 30,
+    borderWidth: 1,
+    borderColor: 'rgba(72, 52, 223, 0.1)',
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 10,
+    elevation: 2,
+  },
+  personalityHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  personalityTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: COLORS.primary,
+    marginLeft: 10,
+  },
+  typeText: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: COLORS.primary,
+    marginBottom: 10,
+  },
+  scorePills: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  scorePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(72, 52, 223, 0.05)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+    marginRight: 10,
+    marginBottom: 5,
+  },
+  pillText: {
+    fontSize: 12,
+    color: COLORS.primary,
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  noTestText: {
+    fontSize: 14,
+    color: COLORS.secondary,
+    fontStyle: 'italic',
   },
   label: {
     fontSize: 16,

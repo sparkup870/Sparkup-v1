@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Image } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Image, Keyboard } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft, Send } from 'lucide-react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -23,7 +23,18 @@ export default function ChatDetailScreen() {
   };
   const [messages, setMessages] = React.useState<any[]>([]);
   const [inputText, setInputText] = React.useState('');
+  const [isKeyboardVisible, setIsKeyboardVisible] = React.useState(false);
   const flatListRef = React.useRef<FlatList>(null);
+
+  React.useEffect(() => {
+    const showSub = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', () => setIsKeyboardVisible(true));
+    const hideSub = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide' , () => setIsKeyboardVisible(false));
+    
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   React.useEffect(() => {
     fetchMessages();
@@ -69,6 +80,7 @@ export default function ChatDetailScreen() {
 
     const text = inputText.trim();
     setInputText('');
+    Keyboard.dismiss();
 
     // Optimistic update: add message immediately to UI
     const tempId = `temp-${Date.now()}`;
@@ -113,10 +125,10 @@ export default function ChatDetailScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
     >
-      <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
             <ChevronLeft color={COLORS.primary} size={28} />
@@ -129,33 +141,33 @@ export default function ChatDetailScreen() {
             </Text>
           </View>
         </View>
-      </SafeAreaView>
 
-      <FlatList
-        ref={flatListRef}
-        data={messages}
-        keyExtractor={(item) => item.id?.toString() || Math.random().toString()}
-        renderItem={renderMessage}
-        inverted
-        contentContainerStyle={styles.messageList}
-      />
-
-      <View style={[styles.inputContainer, { paddingBottom: insets.bottom + 10 }]}>
-        <TextInput
-          style={styles.input}
-          placeholder="Type a message..."
-          value={inputText}
-          onChangeText={setInputText}
-          multiline
+        <FlatList
+          ref={flatListRef}
+          data={messages}
+          keyExtractor={(item) => item.id?.toString() || Math.random().toString()}
+          renderItem={renderMessage}
+          inverted
+          contentContainerStyle={styles.messageList}
         />
-        <TouchableOpacity 
-          style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]} 
-          onPress={handleSendMessage}
-          disabled={!inputText.trim()}
-        >
-          <Send color={COLORS.white} size={20} />
-        </TouchableOpacity>
-      </View>
+
+        <View style={[styles.inputContainer, { paddingBottom: isKeyboardVisible ? 10 : (insets.bottom || 0) + 10 }]}>
+          <TextInput
+            style={styles.input}
+            placeholder="Type a message..."
+            value={inputText}
+            onChangeText={setInputText}
+            multiline
+          />
+          <TouchableOpacity 
+            style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]} 
+            onPress={handleSendMessage}
+            disabled={!inputText.trim()}
+          >
+            <Send color={COLORS.white} size={20} />
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
     </KeyboardAvoidingView>
   );
 }
@@ -166,6 +178,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.white,
   },
   safeArea: {
+    flex: 1,
     backgroundColor: COLORS.white,
   },
   header: {

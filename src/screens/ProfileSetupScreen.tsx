@@ -93,8 +93,8 @@ export default function ProfileSetupScreen() {
 
       await fetchProfile(); // Refresh store
       
-      // Navigate to Questionnaire
-      navigation.navigate('Questionnaire');
+      // Navigate to Personality Test
+      navigation.navigate('PersonalityTest');
       
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Failed to save profile');
