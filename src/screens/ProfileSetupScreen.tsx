@@ -56,22 +56,36 @@ export default function ProfileSetupScreen() {
       const emailDomain = user.email?.split('@')[1] || '';
       
       let uploadedAvatarUrl = 'https://i.pravatar.cc/150?img=' + Math.floor(Math.random() * 70);
-      if (imageBase64) {
-        const fileExt = imageUri?.split('.').pop() || 'jpg';
+      if (imageBase64 && imageUri) {
+        const fileExt = imageUri.split('.').pop() || 'jpg';
         const fileName = `${user.id}-${Date.now()}.${fileExt}`;
+        
+        let fileBody: any;
+        
+        // On Web, fetching the blob from the URI is the most reliable method
+        if (typeof window !== 'undefined' && imageUri.startsWith('blob:')) {
+          const response = await fetch(imageUri);
+          fileBody = await response.blob();
+        } else {
+          // On native, or if base64 is available
+          const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+          fileBody = decode(base64Data);
+        }
         
         const { data: uploadData, error: uploadError } = await supabase.storage
           .from('avatars')
-          .upload(fileName, decode(imageBase64), {
+          .upload(fileName, fileBody, {
             contentType: `image/${fileExt === 'jpg' ? 'jpeg' : fileExt}`
           });
 
         if (uploadError) {
-          throw new Error(`Failed to upload image: ${uploadError.message}`);
+          console.error("Supabase Upload Error:", uploadError);
+          // Don't throw immediately, let the user proceed without avatar if bucket isn't setup
+          Alert.alert("Upload Warning", `Could not upload image. Ensure the 'avatars' bucket exists in Supabase and is public. Error: ${uploadError.message}`);
+        } else {
+          const { data: publicUrlData } = supabase.storage.from('avatars').getPublicUrl(fileName);
+          uploadedAvatarUrl = publicUrlData.publicUrl;
         }
-
-        const { data: publicUrlData } = supabase.storage.from('avatars').getPublicUrl(fileName);
-        uploadedAvatarUrl = publicUrlData.publicUrl;
       }
       
       const { data, error } = await supabase

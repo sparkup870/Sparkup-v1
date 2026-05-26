@@ -7,6 +7,20 @@ import { COLORS, SIZES } from '../constants/theme';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../api/supabase';
 import { useAuthStore } from '../store/useAuthStore';
+import { PanGestureHandler, GestureHandlerRootView } from 'react-native-gesture-handler';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  useAnimatedGestureHandler,
+  withSpring,
+  interpolate,
+  Extrapolation,
+  runOnJS,
+  withTiming
+} from 'react-native-reanimated';
+
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const SWIPE_THRESHOLD = SCREEN_WIDTH * 0.3;
 
 export default function HomeScreen() {
   const navigation = useNavigation<any>();
@@ -25,7 +39,6 @@ export default function HomeScreen() {
   };
 
   // Re-fetch profile whenever this screen comes into focus
-  // so changes from ProfileScreen appear immediately
   useFocusEffect(
     useCallback(() => {
       fetchProfile();
@@ -87,8 +100,8 @@ export default function HomeScreen() {
     setLoading(false);
   };
 
-  const handleSwipe = async (action: 'reject' | 'right' | 'super') => {
-    if (!user || profiles.length === 0) return;
+  const handleSwipeComplete = async (action: 'reject' | 'right' | 'super') => {
+    if (!user || profiles.length === 0 || currentIdx >= profiles.length) return;
 
     const swipedUser = profiles[currentIdx];
 
@@ -102,11 +115,7 @@ export default function HomeScreen() {
 
     if (error) {
       Alert.alert('Error', error.message);
-      return;
-    }
-
-    // Check if a match was created by our DB trigger
-    if (action !== 'reject') {
+    } else if (action !== 'reject') {
       const { data: matchData } = await supabase
         .from('matches')
         .select('*')
@@ -120,11 +129,133 @@ export default function HomeScreen() {
 
     if (currentIdx < profiles.length - 1) {
       setCurrentIdx(prev => prev + 1);
+      translateX.value = 0;
+      translateY.value = 0;
     } else {
-      // No more profiles in current batch
       setProfiles([]);
       fetchProfiles();
     }
+  };
+
+  const triggerSwipe = useCallback((direction: 'left' | 'right' | 'up') => {
+    'worklet';
+    let destX = 0;
+    let destY = 0;
+
+    if (direction === 'left') destX = -SCREEN_WIDTH * 1.5;
+    if (direction === 'right') destX = SCREEN_WIDTH * 1.5;
+    if (direction === 'up') destY = -SCREEN_HEIGHT;
+
+    translateX.value = withTiming(destX, { duration: 300 });
+    translateY.value = withTiming(destY, { duration: 300 }, () => {
+      if (direction === 'left') runOnJS(handleSwipeComplete)('reject');
+      else if (direction === 'right') runOnJS(handleSwipeComplete)('right');
+      else if (direction === 'up') runOnJS(handleSwipeComplete)('super');
+    });
+  }, [translateX, translateY, handleSwipeComplete]);
+
+  const onGestureEvent = useAnimatedGestureHandler({
+    onStart: (_, ctx: any) => {
+      ctx.startX = translateX.value;
+      ctx.startY = translateY.value;
+    },
+    onActive: (event, ctx: any) => {
+      translateX.value = ctx.startX + event.translationX;
+      translateY.value = ctx.startY + event.translationY;
+    },
+    onEnd: (event) => {
+      if (translateX.value > SWIPE_THRESHOLD) {
+        // Swipe Right
+        translateX.value = withSpring(SCREEN_WIDTH * 1.5, { velocity: event.velocityX });
+        runOnJS(handleSwipeComplete)('right');
+      } else if (translateX.value < -SWIPE_THRESHOLD) {
+        // Swipe Left
+        translateX.value = withSpring(-SCREEN_WIDTH * 1.5, { velocity: event.velocityX });
+        runOnJS(handleSwipeComplete)('reject');
+      } else if (translateY.value < -SWIPE_THRESHOLD) {
+        // Swipe Up (Super Like)
+        translateY.value = withSpring(-SCREEN_HEIGHT, { velocity: event.velocityY });
+        runOnJS(handleSwipeComplete)('super');
+      } else {
+        // Reset
+        translateX.value = withSpring(0);
+        translateY.value = withSpring(0);
+      }
+    },
+  });
+
+  const animatedCardStyle = useAnimatedStyle(() => {
+    const rotate = interpolate(
+      translateX.value,
+      [-SCREEN_WIDTH / 2, 0, SCREEN_WIDTH / 2],
+      [-10, 0, 10],
+      Extrapolation.CLAMP
+    );
+
+    return {
+      transform: [
+        { translateX: translateX.value },
+        { translateY: translateY.value },
+        { rotate: `${rotate}deg` },
+      ],
+    };
+  });
+
+  const animatedNextCardStyle = useAnimatedStyle(() => {
+    const scale = interpolate(
+      Math.abs(translateX.value),
+      [0, SCREEN_WIDTH / 2],
+      [0.9, 1],
+      Extrapolation.CLAMP
+    );
+
+    return {
+      transform: [{ scale }],
+    };
+  });
+
+  const renderCard = (profile: any, index: number) => {
+    const isTopCard = index === currentIdx;
+    const isNextCard = index === currentIdx + 1;
+
+    if (index < currentIdx || index > currentIdx + 1) return null;
+
+    return (
+      <Animated.View
+        key={profile.id}
+        style={[
+          styles.cardWrapper,
+          isTopCard ? animatedCardStyle : (isNextCard ? animatedNextCardStyle : {}),
+          { zIndex: profiles.length - index }
+        ]}
+      >
+        <View style={styles.card}>
+          <Image
+            source={{ uri: profile.avatar_url || 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=800&q=80' }}
+            style={styles.cardImage}
+          />
+          <LinearGradient
+            colors={['transparent', 'rgba(0,0,0,0.8)']}
+            style={styles.cardOverlay}
+          >
+            <View style={styles.cardContent}>
+              <View style={styles.locationBadge}>
+                <MapPin color={COLORS.white} size={14} />
+                <Text style={styles.locationText}>{profile.university_domain || 'Campus'}</Text>
+              </View>
+
+              <View style={styles.nameRow}>
+                <Text style={styles.nameText}>{profile.name}</Text>
+              </View>
+
+              <Text style={styles.bioText} numberOfLines={2}>
+                {profile.bio}
+              </Text>
+            </View>
+          </LinearGradient>
+        </View>
+      </Animated.View>
+    );
   };
 
   if (loading) {
@@ -134,8 +265,6 @@ export default function HomeScreen() {
       </View>
     );
   }
-
-  const currentProfile = profiles[currentIdx];
 
   return (
     <LinearGradient
@@ -202,10 +331,10 @@ export default function HomeScreen() {
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyTitle}>No more profiles left!</Text>
               <Text style={styles.emptySubtitle}>You've seen everyone in your area for now.</Text>
-              
+
               {!isReviewMode ? (
-                <TouchableOpacity 
-                  style={styles.reviewButton} 
+                <TouchableOpacity
+                  style={styles.reviewButton}
                   onPress={() => {
                     setIsReviewMode(true);
                     fetchProfiles(true);
@@ -214,8 +343,8 @@ export default function HomeScreen() {
                   <Text style={styles.reviewButtonText}>Review Rejected Profiles</Text>
                 </TouchableOpacity>
               ) : (
-                <TouchableOpacity 
-                  style={styles.reviewButton} 
+                <TouchableOpacity
+                  style={styles.reviewButton}
                   onPress={() => {
                     setIsReviewMode(false);
                     fetchProfiles(false);
@@ -245,6 +374,7 @@ export default function HomeScreen() {
 
       </SafeAreaView>
     </LinearGradient>
+    </GestureHandlerRootView >
   );
 }
 
@@ -262,6 +392,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: SIZES.padding,
     paddingTop: 20,
     paddingBottom: 10,
+    zIndex: 100,
   },
   logoText: {
     fontSize: 28,
@@ -302,11 +433,23 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     paddingBottom: 20,
   },
+  cardWrapper: {
+    position: 'absolute',
+    top: 10,
+    left: 20,
+    right: 20,
+    bottom: 100, // Space for tabs and buttons
+  },
   card: {
     flex: 1,
     borderRadius: SIZES.radius,
     overflow: 'hidden',
     backgroundColor: COLORS.white,
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowOffset: { width: 0, height: 5 },
+    shadowRadius: 10,
+    elevation: 5,
   },
   cardImage: {
     width: '100%',
@@ -413,10 +556,14 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   actionRow: {
+    position: 'absolute',
+    bottom: 20,
+    left: 0,
+    right: 0,
     flexDirection: 'row',
     justifyContent: 'space-evenly',
     alignItems: 'center',
-    paddingBottom: 110, // Space for tabs
+    zIndex: 100,
   },
   actionBtn: {
     width: 60,
