@@ -2,7 +2,7 @@ import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { NavigationContainer } from '@react-navigation/native';
-import { Home, MessageCircle, MapPin, Compass } from 'lucide-react-native';
+import { Home, MessageCircle, User, Compass } from 'lucide-react-native';
 import { StyleSheet } from 'react-native';
 
 import HomeScreen from '../screens/HomeScreen';
@@ -12,7 +12,7 @@ import WelcomeScreen from '../screens/WelcomeScreen';
 import LoginScreen from '../screens/LoginScreen';
 import ProfileSetupScreen from '../screens/ProfileSetupScreen';
 import QuestionnaireScreen from '../screens/QuestionnaireScreen';
-import GhostScreen from '../screens/GhostScreen';
+
 import PostsScreen from '../screens/PostsScreen';
 import ChatDetailScreen from '../screens/ChatDetailScreen';
 import ProfileScreen from '../screens/ProfileScreen';
@@ -62,10 +62,10 @@ function TabNavigator() {
       />
       <Tab.Screen
         name="ProfileTab"
-        component={GhostScreen}
+        component={ProfileScreen}
         options={{
           tabBarIcon: ({ color, size }) => (
-            <MapPin color={color} size={28} />
+            <User color={color} size={28} />
           ),
         }}
       />
