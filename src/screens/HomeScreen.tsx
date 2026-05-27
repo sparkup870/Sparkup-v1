@@ -1,11 +1,20 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
-  View, Text, StyleSheet, Image, TouchableOpacity,
-  ActivityIndicator, Alert, Dimensions, Animated, PanResponder,
+  View,
+  Text,
+  StyleSheet,
+  Image,
+  TouchableOpacity,
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  Animated,
+  PanResponder,
+  Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { MapPin, Award } from 'lucide-react-native';
+import { MapPin, Award, X, Heart, Star } from 'lucide-react-native';
 import { COLORS, SIZES } from '../constants/theme';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
@@ -16,17 +25,29 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const SWIPE_THRESHOLD = SCREEN_WIDTH * 0.3;
 
+// Action button config
+const ACTION_BUTTONS = [
+  { action: 'reject' as const, icon: X,     bg: '#FF6B6B', size: 56, iconSize: 22, shadow: '#FF6B6B' },
+  { action: 'super'  as const, icon: Star,  bg: '#4834DF', size: 64, iconSize: 26, shadow: '#4834DF' },
+  { action: 'right'  as const, icon: Heart, bg: '#6AB04C', size: 56, iconSize: 22, shadow: '#6AB04C' },
+];
+
 export default function HomeScreen() {
   const navigation = useNavigation<any>();
+  const insets = useSafeAreaInsets();
   const tabBarHeight = useBottomTabBarHeight();
   const { user, profile, fetchProfile } = useAuthStore();
+
   const [profiles, setProfiles] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [isReviewMode, setIsReviewMode] = useState(false);
 
-  // ── Pure RN Animated – no Reanimated, no native module issues ──
+  // Card drag animation
   const position = useRef(new Animated.ValueXY()).current;
+
+  // Per-button press scale animations
+  const btnScales = useRef(ACTION_BUTTONS.map(() => new Animated.Value(1))).current;
 
   const currentProfile =
     profiles.length > 0 && currentIdx < profiles.length
@@ -35,8 +56,7 @@ export default function HomeScreen() {
 
   const isOnline = (lastSeen: string | null) => {
     if (!lastSeen) return false;
-    const diff = (Date.now() - new Date(lastSeen).getTime()) / 1000 / 60;
-    return diff < 5;
+    return (Date.now() - new Date(lastSeen).getTime()) / 60000 < 5;
   };
 
   useFocusEffect(
@@ -49,6 +69,7 @@ export default function HomeScreen() {
     fetchProfiles();
   }, []);
 
+  // ─── Data fetching ────────────────────────────────────────────────────────
   const fetchProfiles = async (reviewMode = isReviewMode) => {
     if (!user) return;
     setLoading(true);
@@ -61,7 +82,6 @@ export default function HomeScreen() {
         .eq('action', 'reject');
 
       const rejectedIds = (rejectedSwipes || []).map((s) => s.swiped_id);
-
       if (rejectedIds.length === 0) {
         setProfiles([]);
         setLoading(false);
@@ -100,15 +120,14 @@ export default function HomeScreen() {
     setLoading(false);
   };
 
+  // ─── Swipe logic ──────────────────────────────────────────────────────────
   const handleSwipeComplete = async (action: 'reject' | 'right' | 'super') => {
-    if (!user || profiles.length === 0 || currentIdx >= profiles.length) return;
-
-    const swipedUser = profiles[currentIdx];
+    if (!user || !currentProfile) return;
 
     const { error } = await supabase
       .from('swipes')
       .upsert(
-        { swiper_id: user.id, swiped_id: swipedUser.id, action },
+        { swiper_id: user.id, swiped_id: currentProfile.id, action },
         { onConflict: 'swiper_id,swiped_id' }
       );
 
@@ -119,13 +138,13 @@ export default function HomeScreen() {
         .from('matches')
         .select('*')
         .or(
-          `and(user1_id.eq.${user.id},user2_id.eq.${swipedUser.id}),` +
-          `and(user1_id.eq.${swipedUser.id},user2_id.eq.${user.id})`
+          `and(user1_id.eq.${user.id},user2_id.eq.${currentProfile.id}),` +
+          `and(user1_id.eq.${currentProfile.id},user2_id.eq.${user.id})`
         )
         .single();
 
       if (matchData) {
-        navigation.navigate('MatchModal', { match: matchData, otherUser: swipedUser });
+        navigation.navigate('MatchModal', { match: matchData, otherUser: currentProfile });
       }
     }
 
@@ -138,21 +157,14 @@ export default function HomeScreen() {
     }
   };
 
-  /** Animate card off screen left or right, then record the swipe */
-  const swipeCard = (direction: 'left' | 'right' | 'up') => {
-    const destX =
-      direction === 'left' ? -SCREEN_WIDTH * 1.5 :
-      direction === 'right' ? SCREEN_WIDTH * 1.5 : 0;
-
+  const swipeCard = (direction: 'left' | 'right') => {
+    const destX = direction === 'left' ? -SCREEN_WIDTH * 1.5 : SCREEN_WIDTH * 1.5;
     Animated.timing(position, {
-      toValue: { x: destX, y: 0 },   // Y stays 0 — no vertical fly-off
-      duration: 300,
+      toValue: { x: destX, y: 0 },
+      duration: 320,
       useNativeDriver: true,
     }).start(() => {
-      const action =
-        direction === 'left' ? 'reject' :
-        direction === 'right' ? 'right' : 'super';
-      handleSwipeComplete(action);
+      handleSwipeComplete(direction === 'left' ? 'reject' : 'right');
     });
   };
 
@@ -160,23 +172,42 @@ export default function HomeScreen() {
     Animated.spring(position, {
       toValue: { x: 0, y: 0 },
       useNativeDriver: true,
+      tension: 40,
+      friction: 6,
     }).start();
   };
 
-  /** Button-triggered swipes */
   const handleSwipe = (action: 'reject' | 'super' | 'right') => {
+    if (!currentProfile) return;
     if (action === 'reject') swipeCard('left');
-    else if (action === 'super') swipeCard('up');
-    else swipeCard('right');
+    else if (action === 'right') swipeCard('right');
+    else handleSwipeComplete('super'); // super like — no fly-off animation
+  };
+
+  // Button press micro-interaction
+  const animateButtonPress = (index: number, action: 'reject' | 'super' | 'right') => {
+    Animated.sequence([
+      Animated.spring(btnScales[index], {
+        toValue: 0.82,
+        useNativeDriver: true,
+        tension: 200,
+        friction: 5,
+      }),
+      Animated.spring(btnScales[index], {
+        toValue: 1,
+        useNativeDriver: true,
+        tension: 200,
+        friction: 5,
+      }),
+    ]).start();
+    handleSwipe(action);
   };
 
   const panResponder = useRef(
     PanResponder.create({
-      // Only claim the gesture when horizontal movement clearly dominates
       onMoveShouldSetPanResponder: (_, gs) =>
         Math.abs(gs.dx) > Math.abs(gs.dy) && Math.abs(gs.dx) > 8,
       onPanResponderMove: (_, gs) => {
-        // Only move the card left/right — ignore vertical drag entirely
         position.setValue({ x: gs.dx, y: 0 });
       },
       onPanResponderRelease: (_, gs) => {
@@ -187,41 +218,57 @@ export default function HomeScreen() {
     })
   ).current;
 
+  // Derived animated values
   const rotation = position.x.interpolate({
     inputRange: [-SCREEN_WIDTH / 2, 0, SCREEN_WIDTH / 2],
     outputRange: ['-10deg', '0deg', '10deg'],
     extrapolate: 'clamp',
   });
 
+  const likeOpacity = position.x.interpolate({
+    inputRange: [0, SCREEN_WIDTH * 0.25],
+    outputRange: [0, 1],
+    extrapolate: 'clamp',
+  });
+
+  const nopeOpacity = position.x.interpolate({
+    inputRange: [-SCREEN_WIDTH * 0.25, 0],
+    outputRange: [1, 0],
+    extrapolate: 'clamp',
+  });
+
   const cardAnimatedStyle = {
-    transform: [
-      { translateX: position.x },
-      // No translateY — card never moves vertically
-      { rotate: rotation },
-    ],
+    transform: [{ translateX: position.x }, { rotate: rotation }],
   };
 
+  // The action row sits above the tab bar — tab bar is absolute with height 90
+  const ACTION_ROW_BOTTOM = tabBarHeight + 8;
+
+  // ─── Loading ──────────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+      <View style={[styles.loadingContainer]}>
         <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text style={styles.loadingText}>Finding people near you…</Text>
       </View>
     );
   }
 
+  // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <LinearGradient
         colors={[COLORS.backgroundTop, COLORS.backgroundBottom]}
         style={styles.container}
       >
-        <SafeAreaView style={styles.safeArea}>
+        <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
 
-          {/* Header */}
+          {/* ── Header ── */}
           <View style={styles.header}>
             <Text style={styles.logoText}>SparkUp</Text>
             <TouchableOpacity
               style={styles.profileCircle}
+              activeOpacity={0.8}
               onPress={() => navigation.navigate('Profile')}
             >
               <Image
@@ -231,8 +278,8 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Card area */}
-          <View style={styles.cardContainer}>
+          {/* ── Card area — leaves room for action buttons above tab bar ── */}
+          <View style={[styles.cardContainer, { paddingBottom: ACTION_ROW_BOTTOM + 88 }]}>
             {currentProfile ? (
               <Animated.View
                 style={[styles.card, cardAnimatedStyle]}
@@ -246,26 +293,33 @@ export default function HomeScreen() {
                   }}
                   style={styles.cardImage}
                 />
+
+                {/* LIKE stamp */}
+                <Animated.View style={[styles.stamp, styles.likeStamp, { opacity: likeOpacity }]}>
+                  <Text style={styles.stampText}>LIKE</Text>
+                </Animated.View>
+
+                {/* NOPE stamp */}
+                <Animated.View style={[styles.stamp, styles.nopeStamp, { opacity: nopeOpacity }]}>
+                  <Text style={[styles.stampText, { color: '#FF6B6B' }]}>NOPE</Text>
+                </Animated.View>
+
                 <LinearGradient
-                  colors={['transparent', 'rgba(0,0,0,0.85)']}
+                  colors={['transparent', 'rgba(0,0,0,0.88)']}
                   style={styles.cardOverlay}
                 >
                   <View style={styles.cardContent}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    {/* Badges row */}
+                    <View style={styles.badgeRow}>
                       <View style={styles.locationBadge}>
-                        <MapPin color={COLORS.white} size={14} />
+                        <MapPin color={COLORS.white} size={13} />
                         <Text style={styles.locationText}>
                           {currentProfile.university_domain || 'Campus'}
                         </Text>
                       </View>
                       {currentProfile.personality_type && (
-                        <View
-                          style={[
-                            styles.locationBadge,
-                            { marginLeft: 10, backgroundColor: 'rgba(72,52,223,0.4)' },
-                          ]}
-                        >
-                          <Award color={COLORS.white} size={14} />
+                        <View style={[styles.locationBadge, styles.personalityBadge]}>
+                          <Award color={COLORS.white} size={13} />
                           <Text style={styles.locationText}>
                             {currentProfile.personality_type}
                           </Text>
@@ -273,8 +327,11 @@ export default function HomeScreen() {
                       )}
                     </View>
 
+                    {/* Name + online */}
                     <View style={styles.nameRow}>
-                      <Text style={styles.nameText}>{currentProfile.name || ''}</Text>
+                      <Text style={styles.nameText} numberOfLines={1}>
+                        {currentProfile.name || ''}
+                      </Text>
                       {isOnline(currentProfile.last_seen) && (
                         <View style={styles.activeBadge}>
                           <View style={styles.activeDot} />
@@ -290,51 +347,58 @@ export default function HomeScreen() {
                 </LinearGradient>
               </Animated.View>
             ) : (
+              /* ── Empty state ── */
               <View style={styles.emptyContainer}>
-                <Text style={styles.emptyTitle}>No more profiles!</Text>
+                <Text style={styles.emptyEmoji}>🌟</Text>
+                <Text style={styles.emptyTitle}>You're all caught up!</Text>
                 <Text style={styles.emptySubtitle}>
-                  You've seen everyone in your area for now.
+                  No new profiles right now. Check back soon or revisit people you passed on.
                 </Text>
-                {!isReviewMode ? (
-                  <TouchableOpacity
-                    style={styles.reviewButton}
-                    onPress={() => { setIsReviewMode(true); fetchProfiles(true); }}
-                  >
-                    <Text style={styles.reviewButtonText}>Review Rejected Profiles</Text>
-                  </TouchableOpacity>
-                ) : (
-                  <TouchableOpacity
-                    style={styles.reviewButton}
-                    onPress={() => { setIsReviewMode(false); fetchProfiles(false); }}
-                  >
-                    <Text style={styles.reviewButtonText}>Back to New Profiles</Text>
-                  </TouchableOpacity>
-                )}
+                <TouchableOpacity
+                  style={styles.reviewButton}
+                  activeOpacity={0.85}
+                  onPress={() => {
+                    const next = !isReviewMode;
+                    setIsReviewMode(next);
+                    fetchProfiles(next);
+                  }}
+                >
+                  <Text style={styles.reviewButtonText}>
+                    {isReviewMode ? 'Back to New Profiles' : 'Review Rejected Profiles'}
+                  </Text>
+                </TouchableOpacity>
               </View>
             )}
           </View>
 
-          {/* Action buttons — in normal flow, always visible below the card */}
-          <View style={styles.actionRow}>
-            <TouchableOpacity
-              style={[styles.actionBtn, { backgroundColor: '#FF6B6B' }]}
-              onPress={() => handleSwipe('reject')}
-            >
-              <Text style={styles.actionBtnText}>✕</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.actionBtn, { backgroundColor: '#4834DF' }]}
-              onPress={() => handleSwipe('super')}
-            >
-              <Text style={styles.actionBtnText}>✨</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.actionBtn, { backgroundColor: '#6AB04C' }]}
-              onPress={() => handleSwipe('right')}
-            >
-              <Text style={styles.actionBtnText}>💖</Text>
-            </TouchableOpacity>
-          </View>
+          {/* ── Action buttons — floats above tab bar ── */}
+          {currentProfile && (
+            <View style={[styles.actionRow, { bottom: ACTION_ROW_BOTTOM }]}>
+              {ACTION_BUTTONS.map(({ action, icon: Icon, bg, size, iconSize, shadow }, i) => (
+                <Animated.View
+                  key={action}
+                  style={{ transform: [{ scale: btnScales[i] }] }}
+                >
+                  <TouchableOpacity
+                    activeOpacity={0.9}
+                    style={[
+                      styles.actionBtn,
+                      {
+                        width: size,
+                        height: size,
+                        borderRadius: size / 2,
+                        backgroundColor: bg,
+                        shadowColor: shadow,
+                      },
+                    ]}
+                    onPress={() => animateButtonPress(i, action)}
+                  >
+                    <Icon color="#fff" size={iconSize} strokeWidth={2.5} />
+                  </TouchableOpacity>
+                </Animated.View>
+              ))}
+            </View>
+          )}
 
         </SafeAreaView>
       </LinearGradient>
@@ -342,81 +406,149 @@ export default function HomeScreen() {
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.backgroundTop,
+    gap: 12,
+  },
+  loadingText: {
+    color: COLORS.secondary,
+    fontSize: 14,
+  },
   container: { flex: 1 },
   safeArea: { flex: 1 },
+
+  // Header
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: SIZES.padding,
-    paddingTop: 20,
+    paddingTop: Platform.OS === 'android' ? 12 : 8,
     paddingBottom: 10,
   },
   logoText: {
     fontSize: 28,
     fontWeight: '800',
     color: COLORS.primary,
+    letterSpacing: -0.5,
   },
   profileCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: COLORS.primary,
   },
   profileImage: { width: '100%', height: '100%' },
+
+  // Card container
   cardContainer: {
     flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 10,
-    paddingBottom: 12,
+    paddingHorizontal: 16,
+    paddingTop: 6,
   },
+
+  // Swipe card
   card: {
     flex: 1,
     borderRadius: SIZES.radius,
     overflow: 'hidden',
     backgroundColor: COLORS.white,
     shadowColor: '#000',
-    shadowOpacity: 0.15,
-    shadowOffset: { width: 0, height: 8 },
-    shadowRadius: 16,
-    elevation: 8,
+    shadowOpacity: 0.18,
+    shadowOffset: { width: 0, height: 10 },
+    shadowRadius: 20,
+    elevation: 10,
   },
-  cardImage: { width: '100%', height: '100%', position: 'absolute' },
-  cardOverlay: { flex: 1, justifyContent: 'flex-end', padding: 20 },
+  cardImage: {
+    width: '100%',
+    height: '100%',
+    position: 'absolute',
+  },
+  cardOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    padding: 20,
+  },
   cardContent: { justifyContent: 'flex-end' },
+
+  // Swipe stamps
+  stamp: {
+    position: 'absolute',
+    top: 48,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 3,
+    zIndex: 10,
+  },
+  likeStamp: {
+    left: 20,
+    borderColor: '#6AB04C',
+    transform: [{ rotate: '-15deg' }],
+  },
+  nopeStamp: {
+    right: 20,
+    borderColor: '#FF6B6B',
+    transform: [{ rotate: '15deg' }],
+  },
+  stampText: {
+    fontSize: 28,
+    fontWeight: '900',
+    color: '#6AB04C',
+    letterSpacing: 2,
+  },
+
+  // Card info
+  badgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    marginBottom: 8,
+    gap: 8,
+  },
   locationBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.2)',
-    alignSelf: 'flex-start',
     paddingHorizontal: 10,
     paddingVertical: 5,
-    borderRadius: 15,
-    marginBottom: 10,
+    borderRadius: 20,
+  },
+  personalityBadge: {
+    backgroundColor: 'rgba(72,52,223,0.4)',
   },
   locationText: {
     color: COLORS.white,
     marginLeft: 4,
     fontSize: 12,
-    fontWeight: '500',
+    fontWeight: '600',
   },
   nameRow: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
-    marginBottom: 10,
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    marginBottom: 6,
+    gap: 8,
   },
   nameText: {
-    fontSize: 36,
-    fontWeight: 'bold',
+    fontSize: 34,
+    fontWeight: '800',
     color: COLORS.white,
-    marginRight: 10,
+    letterSpacing: -0.5,
+    flexShrink: 1,
   },
   bioText: {
     color: 'rgba(255,255,255,0.85)',
     fontSize: 14,
     lineHeight: 20,
-    marginBottom: 15,
+    marginBottom: 4,
   },
   activeBadge: {
     flexDirection: 'row',
@@ -424,76 +556,83 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(106,176,76,0.25)',
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 10,
-    marginBottom: 8,
+    borderRadius: 12,
   },
   activeDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
     backgroundColor: '#6AB04C',
-    marginRight: 6,
+    marginRight: 5,
   },
   activeText: {
     color: '#6AB04C',
     fontSize: 10,
-    fontWeight: 'bold',
+    fontWeight: '700',
     textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
+
+  // Empty state
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
+    padding: 32,
+  },
+  emptyEmoji: {
+    fontSize: 56,
+    marginBottom: 16,
   },
   emptyTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
+    fontSize: 22,
+    fontWeight: '800',
     color: COLORS.primary,
     marginBottom: 10,
+    textAlign: 'center',
   },
   emptySubtitle: {
-    fontSize: 16,
+    fontSize: 15,
     color: COLORS.secondary,
     textAlign: 'center',
-    marginBottom: 30,
+    lineHeight: 22,
+    marginBottom: 32,
   },
   reviewButton: {
-    backgroundColor: COLORS.white,
-    paddingHorizontal: 25,
-    paddingVertical: 15,
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 28,
+    paddingVertical: 14,
     borderRadius: 30,
-    borderWidth: 2,
-    borderColor: COLORS.primary,
-    elevation: 3,
+    shadowColor: COLORS.primary,
+    shadowOpacity: 0.35,
+    shadowOffset: { width: 0, height: 6 },
+    shadowRadius: 12,
+    elevation: 6,
   },
   reviewButtonText: {
-    color: COLORS.primary,
-    fontWeight: 'bold',
-    fontSize: 16,
+    color: COLORS.white,
+    fontWeight: '700',
+    fontSize: 15,
+    letterSpacing: 0.3,
   },
+
+  // Action buttons
   actionRow: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
     flexDirection: 'row',
-    justifyContent: 'space-evenly',
+    justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 14,
+    gap: 24,
     paddingHorizontal: 20,
   },
   actionBtn: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 10,
-    elevation: 5,
-  },
-  actionBtnText: {
-    color: COLORS.white,
-    fontSize: 24,
-    fontWeight: 'bold',
+    shadowOpacity: 0.35,
+    shadowOffset: { width: 0, height: 6 },
+    shadowRadius: 14,
+    elevation: 8,
   },
 });
