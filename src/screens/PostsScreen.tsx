@@ -62,8 +62,9 @@ const uid = () => Math.random().toString(36).slice(2);
 
 /** Pill badge for post type */
 const TypeBadge = ({ type }: { type: PostType }) => {
-  const cfg = TYPE_COLORS[type];
-  const Icon = POST_TYPES.find(p => p.type === type)?.icon;
+  const safeType: PostType = TYPE_COLORS[type] ? type : 'text';
+  const cfg = TYPE_COLORS[safeType];
+  const Icon = POST_TYPES.find(p => p.type === safeType)?.icon;
   return (
     <View style={[badgeStyles.pill, { backgroundColor: cfg.bg }]}>
       {Icon && <Icon color={cfg.accent} size={11} strokeWidth={2.5} />}
@@ -468,6 +469,9 @@ export default function PostsScreen() {
   const renderPost = useCallback(({ item }: { item: Post }) => {
     const liked = userLikes.has(item.id);
     const commentCount = item.post_comments?.length || 0;
+    // Normalise post_type — old rows without the column come back as null
+    const postType: PostType = TYPE_COLORS[item.post_type] ? item.post_type : 'text';
+    const safeItem = { ...item, post_type: postType };
     return (
       <View style={cardStyles.card}>
         {/* Header */}
@@ -477,18 +481,18 @@ export default function PostsScreen() {
             <Text style={cardStyles.author}>{item.author_name}</Text>
             <Text style={cardStyles.time}>{formatTime(item.created_at)}</Text>
           </View>
-          <TypeBadge type={item.post_type} />
+          <TypeBadge type={safeItem.post_type} />
         </View>
 
         {/* Content */}
-        {item.post_type === 'announcement'
+        {safeItem.post_type === 'announcement'
           ? <AnnouncementBanner content={item.content} />
           : item.content ? <Text style={cardStyles.content}>{item.content}</Text> : null
         }
 
         {/* Type-specific bodies */}
-        {item.post_type === 'poll' && <PollBody post={item} userId={user?.id} onVote={handleVote} />}
-        {item.post_type === 'event' && <EventBody post={item} userId={user?.id} onRsvp={handleRsvp} />}
+        {safeItem.post_type === 'poll' && <PollBody post={item} userId={user?.id} onVote={handleVote} />}
+        {safeItem.post_type === 'event' && <EventBody post={item} userId={user?.id} onRsvp={handleRsvp} />}
 
         {/* Images */}
         {item.images && item.images.length > 0 && item.post_type !== 'event' && (
