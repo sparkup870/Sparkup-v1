@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   ActivityIndicator, Alert, TextInput, Modal, RefreshControl,
   Image, ScrollView, Animated, Dimensions, Platform, KeyboardAvoidingView,
+  Linking,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -194,7 +195,13 @@ const pollStyles = StyleSheet.create({
 });
 
 /** Event card body */
-const EventBody = ({ post, userId, onRsvp }: { post: Post; userId?: string; onRsvp: (postId: string) => void }) => (
+const EventBody = ({
+  post, userId, hasRsvp, onRsvp, onShowAttendees,
+}: {
+  post: Post; userId?: string; hasRsvp: boolean;
+  onRsvp: (postId: string) => void;
+  onShowAttendees: (postId: string) => void;
+}) => (
   <View style={eventStyles.container}>
     {post.event_cover && (
       <Image source={{ uri: post.event_cover }} style={eventStyles.cover} resizeMode="cover" />
@@ -213,14 +220,21 @@ const EventBody = ({ post, userId, onRsvp }: { post: Post; userId?: string; onRs
         </View>
       )}
       <View style={eventStyles.rsvpRow}>
-        <TouchableOpacity style={eventStyles.rsvpBtn} onPress={() => onRsvp(post.id)} activeOpacity={0.85}>
-          <Check color="#fff" size={14} strokeWidth={3} />
-          <Text style={eventStyles.rsvpText}>I'm Going</Text>
-        </TouchableOpacity>
-        <View style={eventStyles.attendees}>
-          <Users color={COLORS.secondary} size={14} />
+        {hasRsvp ? (
+          <View style={eventStyles.rsvpConfirmed}>
+            <Check color="#10B981" size={14} strokeWidth={3} />
+            <Text style={eventStyles.rsvpConfirmedText}>You're Going!</Text>
+          </View>
+        ) : (
+          <TouchableOpacity style={eventStyles.rsvpBtn} onPress={() => onRsvp(post.id)} activeOpacity={0.85}>
+            <Check color="#fff" size={14} strokeWidth={3} />
+            <Text style={eventStyles.rsvpText}>I'm Going</Text>
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity style={eventStyles.attendees} onPress={() => onShowAttendees(post.id)} activeOpacity={0.75}>
+          <Users color="#10B981" size={14} />
           <Text style={eventStyles.attendeesText}>{post.event_rsvp_count || 0} going</Text>
-        </View>
+        </TouchableOpacity>
       </View>
     </View>
   </View>
@@ -235,8 +249,10 @@ const eventStyles = StyleSheet.create({
   rsvpRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 4 },
   rsvpBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#10B981', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
   rsvpText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  rsvpConfirmed: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#D1FAE5', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, borderWidth: 1.5, borderColor: '#10B981' },
+  rsvpConfirmedText: { color: '#065F46', fontWeight: '700', fontSize: 13 },
   attendees: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  attendeesText: { fontSize: 13, color: COLORS.secondary, fontWeight: '500' },
+  attendeesText: { fontSize: 13, color: '#047857', fontWeight: '600', textDecorationLine: 'underline' },
 });
 
 /** Announcement banner */
@@ -249,6 +265,40 @@ const AnnouncementBanner = ({ content }: { content: string }) => (
 const annStyles = StyleSheet.create({
   banner: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: '#FEF2F2', borderLeftWidth: 4, borderLeftColor: '#EF4444', borderRadius: 10, padding: 12, marginTop: 8 },
   text: { flex: 1, fontSize: 14, color: '#991B1B', lineHeight: 20, fontWeight: '500' },
+});
+
+/** Auto-linkify text — detects URLs and renders them as tappable links */
+// Using a capturing group in split() places matched parts at odd indices
+const URL_SPLIT_REGEX = /(https?:\/\/[^\s]+|www\.[^\s]+)/;
+const LinkText = ({ text, style }: { text: string; style?: any }) => {
+  const parts = text.split(URL_SPLIT_REGEX);
+  const openLink = (url: string) => {
+    const href = url.startsWith('http') ? url : `https://${url}`;
+    Alert.alert(
+      'Open Link',
+      `Are you sure you want to be redirected to:\n\n${href}`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Open', onPress: () => Linking.openURL(href) },
+      ],
+    );
+  };
+  return (
+    <Text style={style}>
+      {parts.map((part, i) =>
+        i % 2 !== 0 ? (
+          <Text key={i} style={linkTextStyles.link} onPress={() => openLink(part)}>
+            {part}
+          </Text>
+        ) : (
+          <Text key={i}>{part}</Text>
+        )
+      )}
+    </Text>
+  );
+};
+const linkTextStyles = StyleSheet.create({
+  link: { color: '#4834DF', textDecorationLine: 'underline', fontWeight: '600' },
 });
 
 /** Like button with bounce animation */
@@ -286,6 +336,11 @@ export default function PostsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [userLikes, setUserLikes] = useState<Set<string>>(new Set());
   const [userRsvps, setUserRsvps] = useState<Set<string>>(new Set());
+
+  // Attendees modal
+  const [attendeesPostId, setAttendeesPostId] = useState<string | null>(null);
+  const [attendees, setAttendees] = useState<{ name: string; avatar?: string }[]>([]);
+  const [attendeesLoading, setAttendeesLoading] = useState(false);
 
   // Composer state
   const [composerVisible, setComposerVisible] = useState(false);
@@ -381,6 +436,37 @@ export default function PostsScreen() {
     setPosts(p => p.map(x => x.id === postId ? { ...x, event_rsvp_count: (x.event_rsvp_count || 0) + 1 } : x));
     await supabase.from('event_rsvps').insert({ post_id: postId, user_id: user.id });
     await supabase.rpc('increment_rsvp', { post_id: postId });
+  };
+
+  const handleShowAttendees = async (postId: string) => {
+    setAttendeesPostId(postId);
+    setAttendees([]);
+    setAttendeesLoading(true);
+    try {
+      // Step 1: get user IDs who RSVP'd
+      const { data: rsvpData, error: rsvpError } = await supabase
+        .from('event_rsvps')
+        .select('user_id')
+        .eq('post_id', postId);
+      if (rsvpError) throw rsvpError;
+
+      const userIds = (rsvpData || []).map((r: any) => r.user_id);
+      if (userIds.length === 0) { setAttendees([]); return; }
+
+      // Step 2: fetch their profiles separately
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('id, name, avatar_url')
+        .in('id', userIds);
+      if (profileError) throw profileError;
+
+      const list = (profileData || []).map((p: any) => ({
+        name: p.name || 'Unknown',
+        avatar: p.avatar_url,
+      }));
+      setAttendees(list);
+    } catch (e: any) { console.error(e.message); }
+    finally { setAttendeesLoading(false); }
   };
 
   const handleAddComment = async () => {
@@ -487,12 +573,20 @@ export default function PostsScreen() {
         {/* Content */}
         {safeItem.post_type === 'announcement'
           ? <AnnouncementBanner content={item.content} />
-          : item.content ? <Text style={cardStyles.content}>{item.content}</Text> : null
+          : item.content ? <LinkText text={item.content} style={cardStyles.content} /> : null
         }
 
         {/* Type-specific bodies */}
         {safeItem.post_type === 'poll' && <PollBody post={item} userId={user?.id} onVote={handleVote} />}
-        {safeItem.post_type === 'event' && <EventBody post={item} userId={user?.id} onRsvp={handleRsvp} />}
+        {safeItem.post_type === 'event' && (
+          <EventBody
+            post={item}
+            userId={user?.id}
+            hasRsvp={userRsvps.has(item.id)}
+            onRsvp={handleRsvp}
+            onShowAttendees={handleShowAttendees}
+          />
+        )}
 
         {/* Images */}
         {item.images && item.images.length > 0 && item.post_type !== 'event' && (
@@ -759,6 +853,43 @@ export default function PostsScreen() {
           </KeyboardAvoidingView>
         </Modal>
 
+        {/* ── Attendees Modal ── */}
+        <Modal visible={!!attendeesPostId} animationType="slide" transparent onRequestClose={() => setAttendeesPostId(null)}>
+          <View style={modalStyles.overlay}>
+            <View style={[modalStyles.sheet, { maxHeight: '60%' }]}>
+              <View style={modalStyles.handle} />
+              <View style={modalStyles.header}>
+                <TouchableOpacity onPress={() => setAttendeesPostId(null)}>
+                  <X color={COLORS.primary} size={22} />
+                </TouchableOpacity>
+                <Text style={modalStyles.title}>Going ({attendees.length})</Text>
+                <View style={{ width: 22 }} />
+              </View>
+              {attendeesLoading ? (
+                <ActivityIndicator color={COLORS.primary} style={{ margin: 30 }} />
+              ) : (
+                <FlatList
+                  data={attendees}
+                  keyExtractor={(_, i) => String(i)}
+                  contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24 }}
+                  ListEmptyComponent={
+                    <Text style={[screenStyles.emptySubtitle, { textAlign: 'center', marginTop: 20 }]}>
+                      Nobody has RSVP'd yet.
+                    </Text>
+                  }
+                  renderItem={({ item }) => (
+                    <View style={attendeeStyles.row}>
+                      <Avatar name={item.name} uri={item.avatar} size={38} />
+                      <Text style={attendeeStyles.name}>{item.name}</Text>
+                      <Check color="#10B981" size={16} strokeWidth={2.5} />
+                    </View>
+                  )}
+                />
+              )}
+            </View>
+          </View>
+        </Modal>
+
         {/* ── Lightbox ── */}
         <Modal visible={lightboxVisible} transparent animationType="fade" onRequestClose={() => setLightboxVisible(false)}>
           <View style={lightboxStyles.bg}>
@@ -866,4 +997,9 @@ const lightboxStyles = StyleSheet.create({
   bg: { flex: 1, backgroundColor: '#000' },
   close: { position: 'absolute', top: 50, right: 20, zIndex: 10, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 20, padding: 6 },
   counter: { position: 'absolute', bottom: 40, alignSelf: 'center', color: '#fff', fontSize: 14, fontWeight: '600', backgroundColor: 'rgba(0,0,0,0.5)', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 20 },
+});
+
+const attendeeStyles = StyleSheet.create({
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
+  name: { flex: 1, fontSize: 15, fontWeight: '600', color: COLORS.primary },
 });
