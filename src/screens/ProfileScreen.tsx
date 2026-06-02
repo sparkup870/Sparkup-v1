@@ -191,7 +191,7 @@ export default function ProfileScreen() {
             >
               <Award color={COLORS.primary} size={24} />
               <View style={{ flex: 1, marginLeft: 15 }}>
-                <Text style={styles.personalityTitle}>
+                <Text style={styles.personalityBtnTitle}>
                   {profile?.personality_type ? `You are a ${profile.personality_type}` : 'Take Personality Test'}
                 </Text>
                 <Text style={styles.personalitySub}>Find matches based on your vibe.</Text>
@@ -380,7 +380,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E0E0E0',
   },
-  personalityTitle: {
+  personalityBtnTitle: {
     fontSize: 16,
     fontWeight: 'bold',
     color: COLORS.primary,

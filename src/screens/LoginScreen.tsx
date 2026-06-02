@@ -109,7 +109,7 @@ export default function LoginScreen() {
       const { data: { session: loginSession }, error: loginError } = await supabase.auth.verifyOtp({
         email,
         token: otp,
-        type: 'login',
+        type: 'email',
       });
       setLoading(false);
 
@@ -167,7 +167,7 @@ export default function LoginScreen() {
                   autoCapitalize="none"
                   value={email}
                   onChangeText={setEmail}
-                  disabled={loading}
+                  editable={!loading}
                 />
 
                 <TouchableOpacity 
@@ -191,7 +191,7 @@ export default function LoginScreen() {
                   maxLength={6}
                   value={otp}
                   onChangeText={setOtp}
-                  disabled={loading}
+                  editable={!loading}
                 />
 
                 <TouchableOpacity 

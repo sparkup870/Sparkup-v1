@@ -39,9 +39,10 @@ export default function HomeScreen() {
   const { user, profile, fetchProfile } = useAuthStore();
 
   const [profiles, setProfiles] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true);       // only true on very first load
   const [currentIdx, setCurrentIdx] = useState(0);
   const [isReviewMode, setIsReviewMode] = useState(false);
+  const isSwiping = useRef(false);                     // guard against double-swipes
 
   // Card drag animation
   const position = useRef(new Animated.ValueXY()).current;
@@ -69,10 +70,38 @@ export default function HomeScreen() {
     fetchProfiles();
   }, []);
 
+  // ─── Cosine similarity ────────────────────────────────────────────────────
+  // Returns 0-100 score. Both vectors must be same length.
+  const cosineSimilarity = (a: number[], b: number[]): number => {
+    if (a.length === 0 || b.length !== a.length) return 50; // neutral fallback
+    const dot   = a.reduce((s, v, i) => s + v * b[i], 0);
+    const normA = Math.sqrt(a.reduce((s, v) => s + v * v, 0));
+    const normB = Math.sqrt(b.reduce((s, v) => s + v * v, 0));
+    if (normA === 0 || normB === 0) return 50;
+    // cosine is -1 to 1 → map to 0-100
+    return Math.round(((dot / (normA * normB)) + 1) / 2 * 100);
+  };
+
+  // Fetch answer vector for a user: returns array of answer_values sorted by question creation order
+  const fetchAnswerVector = async (userId: string): Promise<number[]> => {
+    const { data } = await supabase
+      .from('user_answers')
+      .select('answer_value, questions(created_at)')
+      .eq('user_id', userId)
+      .order('questions(created_at)', { ascending: true });
+    return (data || []).map((r: any) => r.answer_value ?? 0);
+  };
+
   // ─── Data fetching ────────────────────────────────────────────────────────
-  const fetchProfiles = async (reviewMode = isReviewMode) => {
+  // silent=true → no loading spinner (used when refilling mid-session)
+  const fetchProfiles = async (reviewMode = isReviewMode, silent = false) => {
     if (!user) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
+
+    // Get current user's answer vector once
+    const myVector = await fetchAnswerVector(user.id);
+
+    let candidates: any[] = [];
 
     if (reviewMode) {
       const { data: rejectedSwipes } = await supabase
@@ -92,10 +121,10 @@ export default function HomeScreen() {
         .from('users')
         .select('*')
         .in('id', rejectedIds)
-        .limit(10);
+        .limit(20);
 
       if (error) console.error(error);
-      else setProfiles(data || []);
+      else candidates = data || [];
     } else {
       const { data: swipedRows } = await supabase
         .from('swipes')
@@ -109,52 +138,79 @@ export default function HomeScreen() {
         .from('users')
         .select('*')
         .not('id', 'in', `(${excludedIds.join(',')})`)
-        .limit(10);
+        .limit(40);
 
       if (error) console.error(error);
-      else setProfiles(data || []);
+      else candidates = data || [];
     }
 
+    // Compute compatibility score for each candidate
+    const withScores = await Promise.all(
+      candidates.map(async (p) => {
+        const theirVector = await fetchAnswerVector(p.id);
+        const score = cosineSimilarity(myVector, theirVector);
+        return { ...p, compatibility_score: score };
+      })
+    );
+
+    // Sort by compatibility descending
+    withScores.sort((a, b) => b.compatibility_score - a.compatibility_score);
+
+    setProfiles(withScores);
     setCurrentIdx(0);
     position.setValue({ x: 0, y: 0 });
     setLoading(false);
   };
 
   // ─── Swipe logic ──────────────────────────────────────────────────────────
-  const handleSwipeComplete = async (action: 'reject' | 'right' | 'super') => {
+  const handleSwipeComplete = (action: 'reject' | 'right' | 'super') => {
     if (!user || !currentProfile) return;
+    if (isSwiping.current) return;
+    isSwiping.current = true;
 
-    const { error } = await supabase
-      .from('swipes')
-      .upsert(
-        { swiper_id: user.id, swiped_id: currentProfile.id, action },
-        { onConflict: 'swiper_id,swiped_id' }
-      );
+    // Snapshot the profile we acted on BEFORE advancing the index
+    const actedProfile = currentProfile;
+    const nextIdx = currentIdx + 1;
+    const hasMore = nextIdx < profiles.length;
 
-    if (error) {
-      Alert.alert('Error', error.message);
-    } else if (action !== 'reject') {
-      const { data: matchData } = await supabase
-        .from('matches')
-        .select('*')
-        .or(
-          `and(user1_id.eq.${user.id},user2_id.eq.${currentProfile.id}),` +
-          `and(user1_id.eq.${currentProfile.id},user2_id.eq.${user.id})`
-        )
-        .single();
-
-      if (matchData) {
-        navigation.navigate('MatchModal', { match: matchData, otherUser: currentProfile });
-      }
-    }
-
-    if (currentIdx < profiles.length - 1) {
-      setCurrentIdx((prev) => prev + 1);
+    // ── 1. Advance UI immediately ──────────────────────────────────────────
+    if (hasMore) {
+      setCurrentIdx(nextIdx);
       position.setValue({ x: 0, y: 0 });
     } else {
+      // End of deck — clear immediately, fetch silently in background
+      setCurrentIdx(0);
       setProfiles([]);
-      fetchProfiles();
+      fetchProfiles(isReviewMode, /* silent= */ true);
     }
+
+    // ── 2. DB write fires in background — does NOT block the next card ─────
+    (async () => {
+      const { error } = await supabase
+        .from('swipes')
+        .upsert(
+          { swiper_id: user.id, swiped_id: actedProfile.id, action },
+          { onConflict: 'swiper_id,swiped_id' }
+        );
+
+      if (error) {
+        console.warn('Swipe write error:', error.message);
+      } else if (action !== 'reject') {
+        const { data: matchData } = await supabase
+          .from('matches')
+          .select('*')
+          .or(
+            `and(user1_id.eq.${user.id},user2_id.eq.${actedProfile.id}),` +
+            `and(user1_id.eq.${actedProfile.id},user2_id.eq.${user.id})`
+          )
+          .maybeSingle();
+
+        if (matchData) {
+          navigation.navigate('MatchModal', { match: matchData, otherUser: actedProfile });
+        }
+      }
+      isSwiping.current = false;
+    })();
   };
 
   const swipeCard = (direction: 'left' | 'right') => {
@@ -281,71 +337,98 @@ export default function HomeScreen() {
           {/* ── Card area — leaves room for action buttons above tab bar ── */}
           <View style={[styles.cardContainer, { paddingBottom: ACTION_ROW_BOTTOM + 88 }]}>
             {currentProfile ? (
-              <Animated.View
-                style={[styles.card, cardAnimatedStyle]}
-                {...panResponder.panHandlers}
-              >
-                <Image
-                  source={{
-                    uri:
-                      currentProfile.avatar_url ||
-                      'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=800&q=80',
-                  }}
-                  style={styles.cardImage}
-                />
-
-                {/* LIKE stamp */}
-                <Animated.View style={[styles.stamp, styles.likeStamp, { opacity: likeOpacity }]}>
-                  <Text style={styles.stampText}>LIKE</Text>
-                </Animated.View>
-
-                {/* NOPE stamp */}
-                <Animated.View style={[styles.stamp, styles.nopeStamp, { opacity: nopeOpacity }]}>
-                  <Text style={[styles.stampText, { color: '#FF6B6B' }]}>NOPE</Text>
-                </Animated.View>
-
-                <LinearGradient
-                  colors={['transparent', 'rgba(0,0,0,0.88)']}
-                  style={styles.cardOverlay}
-                >
-                  <View style={styles.cardContent}>
-                    {/* Badges row */}
-                    <View style={styles.badgeRow}>
-                      <View style={styles.locationBadge}>
-                        <MapPin color={COLORS.white} size={13} />
-                        <Text style={styles.locationText}>
-                          {currentProfile.university_domain || 'Campus'}
+              <View style={styles.cardStack}>
+                {/* ── Next card pre-rendered underneath ── */}
+                {profiles[currentIdx + 1] && (
+                  <View style={[styles.card, styles.cardBehind]} pointerEvents="none">
+                    <Image
+                      source={{ uri: profiles[currentIdx + 1].avatar_url || 'https://i.pravatar.cc/800' }}
+                      style={styles.cardImage}
+                    />
+                    <LinearGradient colors={['transparent', 'rgba(0,0,0,0.88)']} style={styles.cardOverlay}>
+                      <View style={styles.cardContent}>
+                        <Text style={styles.nameText} numberOfLines={1}>
+                          {profiles[currentIdx + 1].name || ''}
                         </Text>
                       </View>
-                      {currentProfile.personality_type && (
-                        <View style={[styles.locationBadge, styles.personalityBadge]}>
-                          <Award color={COLORS.white} size={13} />
+                    </LinearGradient>
+                  </View>
+                )}
+
+                {/* ── Current (draggable) card ── */}
+                <Animated.View
+                  style={[styles.card, styles.cardFront, cardAnimatedStyle]}
+                  {...panResponder.panHandlers}
+                >
+                  <Image
+                    source={{
+                      uri:
+                        currentProfile.avatar_url ||
+                        'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=800&q=80',
+                    }}
+                    style={styles.cardImage}
+                  />
+
+                  {/* LIKE stamp */}
+                  <Animated.View style={[styles.stamp, styles.likeStamp, { opacity: likeOpacity }]}>
+                    <Text style={styles.stampText}>LIKE</Text>
+                  </Animated.View>
+
+                  {/* NOPE stamp */}
+                  <Animated.View style={[styles.stamp, styles.nopeStamp, { opacity: nopeOpacity }]}>
+                    <Text style={[styles.stampText, { color: '#FF6B6B' }]}>NOPE</Text>
+                  </Animated.View>
+
+                  <LinearGradient
+                    colors={['transparent', 'rgba(0,0,0,0.88)']}
+                    style={styles.cardOverlay}
+                  >
+                    <View style={styles.cardContent}>
+                      <View style={styles.badgeRow}>
+                        <View style={styles.locationBadge}>
+                          <MapPin color={COLORS.white} size={13} />
                           <Text style={styles.locationText}>
-                            {currentProfile.personality_type}
+                            {currentProfile.university_domain || 'Campus'}
+                          </Text>
+                        </View>
+                        {currentProfile.personality_type && (
+                          <View style={[styles.locationBadge, styles.personalityBadge]}>
+                            <Award color={COLORS.white} size={13} />
+                            <Text style={styles.locationText}>
+                              {currentProfile.personality_type}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+
+                      <View style={styles.nameRow}>
+                        <Text style={styles.nameText} numberOfLines={1}>
+                          {currentProfile.name || ''}
+                        </Text>
+                        {isOnline(currentProfile.last_seen) && (
+                          <View style={styles.activeBadge}>
+                            <View style={styles.activeDot} />
+                            <Text style={styles.activeText}>Active now</Text>
+                          </View>
+                        )}
+                      </View>
+
+                      <Text style={styles.bioText} numberOfLines={2}>
+                        {currentProfile.bio || ''}
+                      </Text>
+
+                      {/* Compatibility score pill */}
+                      {currentProfile.compatibility_score !== undefined && (
+                        <View style={styles.compatBadge}>
+                          <Text style={styles.compatText}>
+                            ⚡ {currentProfile.compatibility_score}% match
                           </Text>
                         </View>
                       )}
                     </View>
-
-                    {/* Name + online */}
-                    <View style={styles.nameRow}>
-                      <Text style={styles.nameText} numberOfLines={1}>
-                        {currentProfile.name || ''}
-                      </Text>
-                      {isOnline(currentProfile.last_seen) && (
-                        <View style={styles.activeBadge}>
-                          <View style={styles.activeDot} />
-                          <Text style={styles.activeText}>Active now</Text>
-                        </View>
-                      )}
-                    </View>
-
-                    <Text style={styles.bioText} numberOfLines={2}>
-                      {currentProfile.bio || ''}
-                    </Text>
-                  </View>
-                </LinearGradient>
-              </Animated.View>
+                  </LinearGradient>
+                </Animated.View>
+              </View>
             ) : (
               /* ── Empty state ── */
               <View style={styles.emptyContainer}>
@@ -360,7 +443,7 @@ export default function HomeScreen() {
                   onPress={() => {
                     const next = !isReviewMode;
                     setIsReviewMode(next);
-                    fetchProfiles(next);
+                    fetchProfiles(next, false);
                   }}
                 >
                   <Text style={styles.reviewButtonText}>
@@ -453,10 +536,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 6,
   },
-
+  // Stack wrapper — gives absolute children a real bounding box
+  cardStack: {
+    flex: 1,
+  },
   // Swipe card
   card: {
-    flex: 1,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     borderRadius: SIZES.radius,
     overflow: 'hidden',
     backgroundColor: COLORS.white,
@@ -464,6 +554,15 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.18,
     shadowOffset: { width: 0, height: 10 },
     shadowRadius: 20,
+    elevation: 10,
+  },
+  cardBehind: {
+    transform: [{ scale: 0.96 }],
+    zIndex: 0,
+    elevation: 8,
+  },
+  cardFront: {
+    zIndex: 1,
     elevation: 10,
   },
   cardImage: {
@@ -634,5 +733,23 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
     shadowRadius: 14,
     elevation: 8,
+  },
+
+  // Compatibility badge on card
+  compatBadge: {
+    alignSelf: 'flex-start',
+    marginTop: 8,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
+  },
+  compatText: {
+    color: COLORS.white,
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.3,
   },
 });
