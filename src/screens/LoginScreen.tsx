@@ -58,7 +58,7 @@ export default function LoginScreen() {
         if (existingProfile) {
           navigation.navigate('MainTabs');
         } else {
-          navigation.navigate('ProfileSetup');
+          navigation.navigate('TermsAndConditions');
         }
       }
       return;
@@ -132,7 +132,7 @@ export default function LoginScreen() {
       if (existingProfile) {
         navigation.navigate('MainTabs');
       } else {
-        navigation.navigate('ProfileSetup');
+        navigation.navigate('TermsAndConditions');
       }
     }
   };

@@ -17,6 +17,7 @@ import PostsScreen from '../screens/PostsScreen';
 import ChatDetailScreen from '../screens/ChatDetailScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import PersonalityTestScreen from '../screens/PersonalityTestScreen';
+import TermsScreen from '../screens/TermsScreen';
 import { COLORS } from '../constants/theme';
 
 const Tab = createBottomTabNavigator();
@@ -79,6 +80,7 @@ export default function RootNavigator() {
       <Stack.Navigator initialRouteName="Welcome" screenOptions={{ headerShown: false }}>
         <Stack.Screen name="Welcome" component={WelcomeScreen} />
         <Stack.Screen name="Login" component={LoginScreen} />
+        <Stack.Screen name="TermsAndConditions" component={TermsScreen} />
         <Stack.Screen name="ProfileSetup" component={ProfileSetupScreen} />
         <Stack.Screen name="Questionnaire" component={QuestionnaireScreen} />
         <Stack.Screen name="PersonalityTest" component={PersonalityTestScreen} />
