@@ -1,11 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Image, Keyboard } from 'react-native';
+import {
+  View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity,
+  KeyboardAvoidingView, Platform, Image, Keyboard,
+} from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronLeft, Send } from 'lucide-react-native';
+import { ChevronLeft, Send, Check, CheckCheck } from 'lucide-react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { supabase } from '../api/supabase';
 import { useAuthStore } from '../store/useAuthStore';
-import { COLORS, SIZES } from '../constants/theme';
+import { COLORS } from '../constants/theme';
 
 export default function ChatDetailScreen() {
   const navigation = useNavigation();
@@ -13,54 +16,72 @@ export default function ChatDetailScreen() {
   const { user } = useAuthStore();
   const { match, otherUser } = route.params;
   const insets = useSafeAreaInsets();
-  
+
+  const [messages, setMessages] = useState<any[]>([]);
+  const [inputText, setInputText] = useState('');
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+  const flatListRef = useRef<FlatList>(null);
+
   const isOnline = (lastSeen: string | null) => {
     if (!lastSeen) return false;
-    const lastSeenDate = new Date(lastSeen);
-    const now = new Date();
-    const diff = (now.getTime() - lastSeenDate.getTime()) / 1000 / 60;
-    return diff < 5;
+    return (Date.now() - new Date(lastSeen).getTime()) / 60000 < 5;
   };
-  const [messages, setMessages] = React.useState<any[]>([]);
-  const [inputText, setInputText] = React.useState('');
-  const [isKeyboardVisible, setIsKeyboardVisible] = React.useState(false);
-  const flatListRef = React.useRef<FlatList>(null);
 
-  React.useEffect(() => {
-    const showSub = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', () => setIsKeyboardVisible(true));
-    const hideSub = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide' , () => setIsKeyboardVisible(false));
-    
-    return () => {
-      showSub.remove();
-      hideSub.remove();
-    };
+  // ── Keyboard listeners ──────────────────────────────────────────────────────
+  useEffect(() => {
+    const show = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      () => setIsKeyboardVisible(true)
+    );
+    const hide = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => setIsKeyboardVisible(false)
+    );
+    return () => { show.remove(); hide.remove(); };
   }, []);
 
-  React.useEffect(() => {
+  // ── Fetch + realtime subscriptions ──────────────────────────────────────────
+  useEffect(() => {
     fetchMessages();
+    markMessagesAsRead();
 
-    // Subscribe to real-time messages for THIS match
     const channel = supabase
       .channel(`match:${match.id}`)
-      .on('postgres_changes', { 
-        event: 'INSERT', 
-        schema: 'public', 
+      // New messages from the other person
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
         table: 'messages',
-        filter: `match_id=eq.${match.id}`
+        filter: `match_id=eq.${match.id}`,
       }, payload => {
-        // Only add if we don't already have this message (deduplication)
-        // This prevents the sender seeing a duplicate from the realtime event
         setMessages(prev => {
           const exists = prev.some(m => m.id === payload.new.id);
           if (exists) return prev;
           return [payload.new, ...prev];
         });
+        // Mark incoming message as read immediately since chat is open
+        if (payload.new.sender_id !== user?.id) {
+          supabase
+            .from('messages')
+            .update({ status: 'read' })
+            .eq('id', payload.new.id)
+            .then(() => {});
+        }
+      })
+      // Status updates (so sender sees blue ticks in real-time)
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'messages',
+        filter: `match_id=eq.${match.id}`,
+      }, payload => {
+        setMessages(prev =>
+          prev.map(m => m.id === payload.new.id ? { ...m, status: payload.new.status } : m)
+        );
       })
       .subscribe();
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, []);
 
   const fetchMessages = async () => {
@@ -72,6 +93,23 @@ export default function ChatDetailScreen() {
 
     if (!error) {
       setMessages(data || []);
+      // After loading, mark the other person's messages as read
+      markMessagesAsRead();
+    }
+  };
+
+  // Mark all unread messages from the other user as 'read'
+  const markMessagesAsRead = async () => {
+    if (!user) return;
+    const { error } = await supabase
+      .from('messages')
+      .update({ status: 'read' })
+      .eq('match_id', match.id)
+      .eq('sender_id', otherUser.id)
+      .eq('status', 'sent');   // only update ones still at 'sent'
+
+    if (error) {
+      console.warn('markMessagesAsRead error:', error.message);
     }
   };
 
@@ -82,58 +120,93 @@ export default function ChatDetailScreen() {
     setInputText('');
     Keyboard.dismiss();
 
-    // Optimistic update: add message immediately to UI
+    // Optimistic update — starts as 'sent'
     const tempId = `temp-${Date.now()}`;
     const optimisticMessage = {
       id: tempId,
       match_id: match.id,
       sender_id: user.id,
       text,
+      status: 'sent',
       created_at: new Date().toISOString(),
     };
     setMessages(prev => [optimisticMessage, ...prev]);
 
     const { data, error } = await supabase
       .from('messages')
-      .insert({ match_id: match.id, sender_id: user.id, text })
+      .insert({ match_id: match.id, sender_id: user.id, text, status: 'sent' })
       .select()
       .single();
 
     if (error) {
-      // Rollback on failure
       setMessages(prev => prev.filter(m => m.id !== tempId));
       console.error(error);
     } else if (data) {
-      // Replace temp message with the real one from DB
       setMessages(prev => prev.map(m => m.id === tempId ? data : m));
     }
   };
 
+  // ── Tick component ──────────────────────────────────────────────────────────
+  const MessageTick = ({ status, isTemp }: { status: string; isTemp: boolean }) => {
+    if (isTemp) {
+      // Still sending — single grey
+      return <Check size={12} color="rgba(255,255,255,0.5)" strokeWidth={2.5} />;
+    }
+    if (status === 'read') {
+      return <CheckCheck size={12} color="#60CBFF" strokeWidth={2.5} />;
+    }
+    // 'sent' — single grey tick
+    return <Check size={12} color="rgba(255,255,255,0.6)" strokeWidth={2.5} />;
+  };
+
+  // ── Message row renderer ────────────────────────────────────────────────────
   const renderMessage = ({ item }: { item: any }) => {
     const isMe = item.sender_id === user?.id;
+    const isTemp = item.id?.toString().startsWith('temp-');
+
     return (
       <View style={[styles.messageWrapper, isMe ? styles.myMessageWrapper : styles.theirMessageWrapper]}>
         <View style={[styles.messageBubble, isMe ? styles.myBubble : styles.theirBubble]}>
           <Text style={[styles.messageText, isMe ? styles.myMessageText : styles.theirMessageText]}>
             {item.text}
           </Text>
+
+          {/* Timestamp + tick row — only on sender's side */}
+          {isMe && (
+            <View style={styles.metaRow}>
+              <Text style={styles.timeText}>
+                {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </Text>
+              <MessageTick status={item.status} isTemp={isTemp} />
+            </View>
+          )}
+          {/* Timestamp only on receiver side */}
+          {!isMe && (
+            <Text style={[styles.timeText, { color: 'rgba(0,0,0,0.4)', marginTop: 3, textAlign: 'left' }]}>
+              {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </Text>
+          )}
         </View>
       </View>
     );
   };
 
+  // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
     >
       <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+        {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
             <ChevronLeft color={COLORS.primary} size={28} />
           </TouchableOpacity>
-          <Image source={{ uri: otherUser.avatar_url || 'https://i.pravatar.cc/150?img=3' }} style={styles.avatar} />
+          <Image
+            source={{ uri: otherUser.avatar_url || 'https://i.pravatar.cc/150?img=3' }}
+            style={styles.avatar}
+          />
           <View style={styles.headerInfo}>
             <Text style={styles.name}>{otherUser.name || ''}</Text>
             <Text style={[styles.status, !isOnline(otherUser.last_seen) && { color: COLORS.secondary }]}>
@@ -142,15 +215,17 @@ export default function ChatDetailScreen() {
           </View>
         </View>
 
+        {/* Messages */}
         <FlatList
           ref={flatListRef}
           data={messages}
-          keyExtractor={(item) => item.id?.toString() || Math.random().toString()}
+          keyExtractor={item => item.id?.toString() || Math.random().toString()}
           renderItem={renderMessage}
           inverted
           contentContainerStyle={styles.messageList}
         />
 
+        {/* Input */}
         <View style={[styles.inputContainer, { paddingBottom: isKeyboardVisible ? 10 : (insets.bottom || 0) + 10 }]}>
           <TextInput
             style={styles.input}
@@ -159,12 +234,12 @@ export default function ChatDetailScreen() {
             onChangeText={setInputText}
             multiline
           />
-          <TouchableOpacity 
-            style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]} 
+          <TouchableOpacity
+            style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]}
             onPress={handleSendMessage}
             disabled={!inputText.trim()}
           >
-            <Send color={COLORS.white} size={20} />
+            <Send color="#fff" size={20} />
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -172,15 +247,10 @@ export default function ChatDetailScreen() {
   );
 }
 
+// ── Styles ────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.white,
-  },
-  safeArea: {
-    flex: 1,
-    backgroundColor: COLORS.white,
-  },
+  container:      { flex: 1, backgroundColor: '#fff' },
+  safeArea:       { flex: 1, backgroundColor: '#fff' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -188,66 +258,46 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#F0F0F0',
   },
-  backButton: {
-    marginRight: 10,
-  },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    marginRight: 12,
-  },
-  headerInfo: {
-    flex: 1,
-  },
-  name: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: COLORS.primary,
-  },
-  status: {
-    fontSize: 12,
-    color: '#6AB04C',
-    fontWeight: '500',
-  },
-  messageList: {
-    paddingHorizontal: 15,
-    paddingVertical: 20,
-  },
-  messageWrapper: {
-    marginBottom: 15,
-    flexDirection: 'row',
-  },
-  myMessageWrapper: {
-    justifyContent: 'flex-end',
-  },
-  theirMessageWrapper: {
-    justifyContent: 'flex-start',
-  },
+  backButton:  { marginRight: 10 },
+  avatar:      { width: 40, height: 40, borderRadius: 20, marginRight: 12 },
+  headerInfo:  { flex: 1 },
+  name:        { fontSize: 16, fontWeight: 'bold', color: COLORS.primary },
+  status:      { fontSize: 12, color: '#6AB04C', fontWeight: '500' },
+  messageList: { paddingHorizontal: 15, paddingVertical: 20 },
+
+  messageWrapper: { marginBottom: 10, flexDirection: 'row' },
+  myMessageWrapper:    { justifyContent: 'flex-end' },
+  theirMessageWrapper: { justifyContent: 'flex-start' },
+
   messageBubble: {
     maxWidth: '80%',
-    paddingHorizontal: 15,
-    paddingVertical: 10,
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingBottom: 8,
     borderRadius: 20,
   },
-  myBubble: {
-    backgroundColor: COLORS.primary,
-    borderBottomRightRadius: 5,
+  myBubble:    { backgroundColor: COLORS.primary, borderBottomRightRadius: 5 },
+  theirBubble: { backgroundColor: '#F0F0F0', borderBottomLeftRadius: 5 },
+
+  messageText: { fontSize: 15, lineHeight: 20 },
+  myMessageText:    { color: '#fff' },
+  theirMessageText: { color: COLORS.primary },
+
+  // Timestamp + tick row (sender side)
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    marginTop: 4,
+    gap: 4,
   },
-  theirBubble: {
-    backgroundColor: '#F0F0F0',
-    borderBottomLeftRadius: 5,
+  timeText: {
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.6)',
+    fontWeight: '500',
   },
-  messageText: {
-    fontSize: 15,
-    lineHeight: 20,
-  },
-  myMessageText: {
-    color: COLORS.white,
-  },
-  theirMessageText: {
-    color: COLORS.primary,
-  },
+
+  // Input bar
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -255,7 +305,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderTopWidth: 1,
     borderTopColor: '#F0F0F0',
-    backgroundColor: COLORS.white,
+    backgroundColor: '#fff',
   },
   input: {
     flex: 1,
@@ -276,7 +326,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  sendButtonDisabled: {
-    backgroundColor: '#CCC',
-  },
+  sendButtonDisabled: { backgroundColor: '#CCC' },
 });

@@ -25,7 +25,7 @@ export default function LoginScreen() {
     // Bypass logic for test accounts
     if (emailDomain === 'bmscetest.com') {
       setLoading(true);
-      const testPassword = 'BmsceTestUser!2026';
+      const testPassword = 'SparkUp@2025';
       
       // Try to sign in first
       let { data, error } = await supabase.auth.signInWithPassword({

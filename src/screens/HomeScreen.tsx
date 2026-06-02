@@ -184,6 +184,9 @@ export default function HomeScreen() {
       fetchProfiles(isReviewMode, /* silent= */ true);
     }
 
+    // ── Unlock immediately so the next swipe gesture is not blocked ────────
+    isSwiping.current = false;
+
     // ── 2. DB write fires in background — does NOT block the next card ─────
     (async () => {
       const { error } = await supabase
@@ -209,7 +212,6 @@ export default function HomeScreen() {
           navigation.navigate('MatchModal', { match: matchData, otherUser: actedProfile });
         }
       }
-      isSwiping.current = false;
     })();
   };
 
