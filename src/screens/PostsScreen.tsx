@@ -374,7 +374,31 @@ export default function PostsScreen() {
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [lightboxVisible, setLightboxVisible] = useState(false);
 
-  useEffect(() => { fetchPosts(); if (user) { fetchUserLikes(); fetchUserRsvps(); } }, [user]);
+  useEffect(() => {
+    fetchPosts();
+    if (user) { fetchUserLikes(); fetchUserRsvps(); }
+
+    // ── Realtime: patch post rows on UPDATE (e.g. rsvp count, likes) ──
+    const channel = supabase
+      .channel('posts-realtime')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'posts' },
+        (payload) => {
+          setPosts(prev =>
+            prev.map(p => p.id === payload.new.id ? { ...p, ...payload.new } : p)
+          );
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'posts' },
+        () => { fetchPosts(); }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [user]);
 
   // ── Data ──────────────────────────────────────────────────────────────────
   const fetchPosts = async () => {
@@ -453,16 +477,16 @@ export default function PostsScreen() {
       const userIds = (rsvpData || []).map((r: any) => r.user_id);
       if (userIds.length === 0) { setAttendees([]); return; }
 
-      // Step 2: fetch their profiles separately
-      const { data: profileData, error: profileError } = await supabase
-        .from('profiles')
+      // Step 2: fetch their profiles from the 'users' table
+      const { data: userData, error: userError } = await supabase
+        .from('users')
         .select('id, name, avatar_url')
         .in('id', userIds);
-      if (profileError) throw profileError;
+      if (userError) throw userError;
 
-      const list = (profileData || []).map((p: any) => ({
-        name: p.name || 'Unknown',
-        avatar: p.avatar_url,
+      const list = (userData || []).map((u: any) => ({
+        name: u.name || 'Unknown',
+        avatar: u.avatar_url,
       }));
       setAttendees(list);
     } catch (e: any) { console.error(e.message); }
